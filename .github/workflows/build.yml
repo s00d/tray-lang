@@ -90,37 +90,75 @@ jobs:
 
     - name: Create signing script
       run: |
+        cat > build/Release/sign-app.applescript << 'EOF'
+        -- Tray Lang - Application Signing Script (AppleScript)
+        
+        display dialog "Tray Lang - Application Signing Script" & return & return & "This script will install and sign the application." buttons {"Cancel", "Install"} default button "Install" with icon note
+        
+        set appName to "tray-lang-universal.app"
+        set appsPath to "/Applications/"
+        set fullAppPath to appsPath & appName
+        
+        try
+            -- Check if app exists in current directory
+            set currentDir to (path to desktop folder as text) & "tray-lang-universal.app"
+            if not (exists file currentDir) then
+                display dialog "ERROR: tray-lang-universal.app not found in current directory." & return & return & "Please make sure you're running this script from the DMG mount point." buttons {"OK"} default button "OK" with icon stop
+                return
+            end if
+            
+            -- Step 1: Set executable permissions
+            do shell script "chmod +x " & quoted form of POSIX path of currentDir
+            
+            -- Step 2: Remove quarantine attributes
+            do shell script "xattr -cr " & quoted form of POSIX path of currentDir
+            
+            -- Step 3: Sign application
+            do shell script "codesign --force --deep --sign - " & quoted form of POSIX path of currentDir
+            
+            -- Step 4: Verify signature
+            do shell script "codesign -dv " & quoted form of POSIX path of currentDir
+            
+            -- Step 5: Copy to Applications folder
+            do shell script "cp -r " & quoted form of POSIX path of currentDir & " " & quoted form of appsPath
+            
+            -- Step 6: Set permissions for Applications folder
+            do shell script "chmod +x " & quoted form of fullAppPath
+            
+            -- Step 7: Remove quarantine attributes from Applications
+            do shell script "xattr -cr " & quoted form of fullAppPath
+            
+            -- Step 8: Sign application in Applications folder
+            do shell script "codesign --force --deep --sign - " & quoted form of fullAppPath
+            
+            -- Step 9: Final verification
+            do shell script "codesign -dv " & quoted form of fullAppPath
+            
+            -- Success message
+            display dialog "Installation completed successfully!" & return & return & "The app is now installed in /Applications/tray-lang-universal.app" & return & return & "Don't forget to grant accessibility permissions in System Preferences!" buttons {"OK"} default button "OK" with icon note
+            
+            -- Optional: Open System Preferences
+            set openPrefs to button returned of (display dialog "Would you like to open System Preferences to grant accessibility permissions?" buttons {"No", "Yes"} default button "Yes")
+            if openPrefs is "Yes" then
+                tell application "System Preferences"
+                    activate
+                    set current pane to pane id "com.apple.preference.security"
+                    reveal anchor "Privacy_Accessibility"
+                end tell
+            end if
+            
+        on error errMsg
+            display dialog "Error during installation: " & errMsg buttons {"OK"} default button "OK" with icon stop
+        end try
+        EOF
+        
+        -- Create a shell script wrapper for easy execution
         cat > build/Release/sign-app.sh << 'EOF'
         #!/bin/bash
-        # Tray Lang - Application Signing Script
+        # Wrapper script to run AppleScript
         
-        echo "Tray Lang - Application Signing Script"
-        echo "======================================"
-        
-        # Check if app exists
-        if [ ! -d "tray-lang-universal.app" ]; then
-          echo "ERROR: tray-lang-universal.app not found in current directory"
-          exit 1
-        fi
-        
-        echo "1. Setting executable permissions..."
-        chmod +x tray-lang-universal.app
-        
-        echo "2. Removing quarantine attributes..."
-        xattr -cr tray-lang-universal.app
-        
-        echo "3. Signing application..."
-        codesign --force --deep --sign - tray-lang-universal.app
-        
-        echo "4. Verifying signature..."
-        codesign -dv tray-lang-universal.app
-        
-        echo "5. If macOS blocks execution, run:"
-        echo "   sudo xattr -rd com.apple.quarantine tray-lang-universal.app"
-        
-        echo ""
-        echo "Signing completed successfully!"
-        echo "You can now drag the app to Applications folder."
+        echo "Running Tray Lang Installation Script..."
+        osascript "$(dirname "$0")/sign-app.applescript"
         EOF
         
         chmod +x build/Release/sign-app.sh
@@ -157,21 +195,16 @@ jobs:
         body: |
           ## Tray Lang v${{ env.VERSION }}
           
-          ### What's New
-          - Universal binary for both Intel and Apple Silicon Macs
-          - Automatic keyboard layout switching
-          - Text transformation between Russian and English
-          
           ### Installation
           1. Download and mount the DMG
           2. Run the signing script: `./sign-app.sh`
-          3. Drag the app to Applications folder
+          3. The app will be automatically installed to Applications folder
           4. Grant accessibility permissions on first launch
           
           ### Files Included
           - `tray-lang-universal.app` - Universal macOS application
           - `README.md` - Installation and usage instructions
-          - `sign-app.sh` - Automatic signing script
+          - `sign-app.sh` - AppleScript-based installation script
           
           ### System Requirements
           - macOS 14.0 or higher

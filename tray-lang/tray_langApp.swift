@@ -7,18 +7,16 @@
 
 import SwiftUI
 import AppKit
+import ApplicationServices
 
 @main
 struct tray_langApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environmentObject(appDelegate.trayLangManager)
+        Settings {
+            EmptyView()
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
     }
 }
 
@@ -37,6 +35,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Настройка автозапуска
         setupAutoLaunch()
+        
+        // Проверяем права доступа и перезапускаем при необходимости
+        checkAccessibilityPermissions()
     }
     
     func setupStatusItem() {
@@ -91,6 +92,58 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Останавливаем мониторинг горячих клавиш при выходе
         trayLangManager.stopMonitoring()
+    }
+    
+    func hideMainWindow() {
+        // Приложение запускается без окон, поэтому ничего не скрываем
+        print("✅ Приложение запущено в скрытом режиме")
+    }
+    
+    func checkAccessibilityPermissions() {
+        // Проверяем права доступа к Accessibility
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString: true]
+        let accessibilityEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        if !accessibilityEnabled {
+            // Если права не предоставлены, показываем уведомление
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.showAccessibilityAlert()
+            }
+        }
+    }
+    
+    func showAccessibilityAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Permissions Required"
+        alert.informativeText = "Tray Lang needs accessibility permissions to work properly. Please grant permissions in System Preferences and restart the app."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Preferences")
+        alert.addButton(withTitle: "Restart App")
+        alert.addButton(withTitle: "Later")
+        
+        let response = alert.runModal()
+        
+        switch response {
+        case .alertFirstButtonReturn:
+            // Открываем System Preferences
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        case .alertSecondButtonReturn:
+            // Перезапускаем приложение
+            restartApp()
+        default:
+            break
+        }
+    }
+    
+    func restartApp() {
+        // Перезапускаем приложение
+        let task = Process()
+        task.launchPath = "/usr/bin/open"
+        task.arguments = ["-a", Bundle.main.bundlePath]
+        task.launch()
+        
+        // Завершаем текущий процесс
+        NSApp.terminate(nil)
     }
     
     func showMainWindow() {

@@ -127,18 +127,48 @@ struct TrayMenuView: View {
     }
     
     private func openHotKeyEditorWindow() {
-        // Send notification to open hotkey editor
-        NotificationCenter.default.post(name: .openHotKeyEditor, object: nil)
+        // Проверяем, открыто ли главное окно
+        if let mainWindow = NSApp.windows.first(where: { $0.title == "Tray Lang" }) {
+            mainWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Если окно не открыто, сначала открываем его
+            showMainWindow()
+        }
+        
+        // Отправляем уведомление для открытия редактора горячих клавиш
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(name: .openHotKeyEditor, object: nil)
+        }
     }
     
     private func openSymbolsEditorWindow() {
-        // Send notification to open symbols editor
-        NotificationCenter.default.post(name: .openSymbolsEditor, object: nil)
+        // Проверяем, открыто ли главное окно
+        if let mainWindow = NSApp.windows.first(where: { $0.title == "Tray Lang" }) {
+            mainWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Если окно не открыто, сначала открываем его
+            showMainWindow()
+        }
+        
+        // Отправляем уведомление для открытия редактора символов
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(name: .openSymbolsEditor, object: nil)
+        }
     }
     
     private func showAboutWindow() {
-        // Send notification to show about window
-        NotificationCenter.default.post(name: .showAboutWindow, object: nil)
+        // Проверяем, открыто ли главное окно
+        if let mainWindow = NSApp.windows.first(where: { $0.title == "Tray Lang" }) {
+            mainWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Если окно не открыто, сначала открываем его
+            showMainWindow()
+        }
+        
+        // Отправляем уведомление для показа окна About
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(name: .showAboutWindow, object: nil)
+        }
     }
 }
 
