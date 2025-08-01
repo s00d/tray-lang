@@ -144,28 +144,12 @@ jobs:
           --window-size 800 500 \
           --icon-size 100 \
           --icon "tray-lang-universal.app" 175 120 \
-          --icon "README.md" 375 120 \
-          --icon "sign-app.sh" 575 120 \
           --hide-extension "tray-lang-universal.app" \
-          --hide-extension "README.md" \
-          --hide-extension "sign-app.sh" \
           --app-drop-link 175 300 \
-          --text-size 12 \
-          --text "README.md" 375 300 \
-          --text "sign-app.sh" 575 300 \
           "build/Release/Tray-Lang-v$VERSION-Universal.dmg" \
           "build/Release/"
 
-    - name: Upload Universal App
-      uses: actions/upload-artifact@v4
-      with:
-        name: tray-lang-v${{ env.VERSION }}-universal
-        path: |
-          build/Release/tray-lang-universal.app
-          build/Release/Tray-Lang-v${{ env.VERSION }}-Universal.dmg
-          build/Release/README.md
-          build/Release/sign-app.sh
-        retention-days: 30
+
 
     - name: Create Release
       if: github.event_name == 'release'
