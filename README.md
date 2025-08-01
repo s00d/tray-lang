@@ -107,6 +107,48 @@ To grant permissions:
 - `SymbolsEditorView`: Character mapping editor
 - `AboutView`: Application information
 
+
+### Building without certificate
+
+**Important**: The application is built without a developer certificate and requires manual signing after installation.
+
+```bash
+# Build for ARM64 (Apple Silicon)
+xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+# Build for x86_64 (Intel)
+xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+```
+
+### Signing the application
+
+After building, the application is unsigned and macOS may block its execution. To sign:
+
+1. **Get Developer ID** (if you have an Apple Developer account):
+   ```bash
+   codesign --force --deep --sign "Developer ID Application: Your Name" /path/to/tray-lang.app
+   ```
+
+2. **Or sign locally** (for personal use):
+   ```bash
+   chmod +x /Applications/tray-lang.app
+   xattr -cr /Applications/tray-lang.app
+   codesign --force --deep --sign - /Applications/tray-lang.app
+   ```
+
+3. **If macOS blocks execution**, run in Terminal:
+   ```bash
+   sudo xattr -rd com.apple.quarantine /path/to/tray-lang.app
+   ```
+
+## Installation
+
+1. Build the application according to the instructions above
+2. Sign the application (see "Signing the application" section)
+3. Drag `tray-lang.app` to the Applications folder
+4. On first launch, grant accessibility permissions in System Preferences → Security & Privacy → Privacy → Accessibility
+
+
 ## Troubleshooting
 
 ### Common Issues

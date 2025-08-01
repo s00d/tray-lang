@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Window management problems
 - Accessibility permission handling
 
-## [1.0.0] - 2025-01-01
+## [1.0.0] - 2025-08-01
 
 ### Added
 - Initial release of Tray Lang
@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Greek ↔ English
 - Cyrillic ↔ English
 
-## [0.9.0] - 2024-12-15
+## [0.9.0] - 2024-08-01
 
 ### Added
 - Basic keyboard layout switching functionality

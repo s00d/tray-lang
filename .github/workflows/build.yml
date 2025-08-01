@@ -21,15 +21,25 @@ jobs:
       with:
         xcode-version: '15.2'
         
+    - name: Clean and prepare
+      run: |
+        xcodebuild clean -project tray-lang/tray-lang.xcodeproj -scheme tray-lang
+        ls -la
+        ls -la tray-lang/
+        
     - name: Build for Intel
       run: |
-        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+        echo "Building for Intel architecture..."
+        xcodebuild -project tray-lang/tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         cp -r build/Release/tray-lang.app build/Release/tray-lang-intel.app
+        echo "Intel build completed"
         
     - name: Build for Apple Silicon
       run: |
-        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+        echo "Building for Apple Silicon architecture..."
+        xcodebuild -project tray-lang/tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         cp -r build/Release/tray-lang.app build/Release/tray-lang-arm64.app
+        echo "Apple Silicon build completed"
         
     - name: Create Universal Binary
       run: |
@@ -41,6 +51,9 @@ jobs:
         
         # Create final universal app
         cp -r build/Release/tray-lang-intel.app build/Release/tray-lang-universal.app
+        
+        # List build artifacts
+        ls -la build/Release/
         
     - name: Create DMG
       run: |
