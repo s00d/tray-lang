@@ -37,8 +37,17 @@ jobs:
         echo "Building for Intel architecture..."
         xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         mkdir -p build/Release
+        echo "Looking for built app..."
         find . -name "tray-lang.app" -type d
-        cp -r $(find . -name "tray-lang.app" -type d | head -1) build/Release/tray-lang-intel.app
+        APP_PATH=$(find . -name "tray-lang.app" -type d | head -1)
+        echo "Found app at: $APP_PATH"
+        if [ -n "$APP_PATH" ]; then
+          cp -r "$APP_PATH" build/Release/tray-lang-intel.app
+          echo "Copied to build/Release/tray-lang-intel.app"
+        else
+          echo "ERROR: Could not find tray-lang.app"
+          exit 1
+        fi
         echo "Intel build completed"
 
     - name: Build for Apple Silicon
@@ -46,8 +55,17 @@ jobs:
         echo "Building for Apple Silicon architecture..."
         xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         mkdir -p build/Release
+        echo "Looking for built app..."
         find . -name "tray-lang.app" -type d
-        cp -r $(find . -name "tray-lang.app" -type d | head -1) build/Release/tray-lang-arm64.app
+        APP_PATH=$(find . -name "tray-lang.app" -type d | head -1)
+        echo "Found app at: $APP_PATH"
+        if [ -n "$APP_PATH" ]; then
+          cp -r "$APP_PATH" build/Release/tray-lang-arm64.app
+          echo "Copied to build/Release/tray-lang-arm64.app"
+        else
+          echo "ERROR: Could not find tray-lang.app"
+          exit 1
+        fi
         echo "Apple Silicon build completed"
 
     - name: Create Universal Binary
