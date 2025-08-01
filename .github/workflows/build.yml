@@ -23,21 +23,26 @@ jobs:
         
     - name: Clean and prepare
       run: |
-        xcodebuild clean -project tray-lang/tray-lang.xcodeproj -scheme tray-lang
+        echo "Current directory structure:"
         ls -la
+        echo "Looking for Xcode project:"
+        find . -name "*.xcodeproj" -type d
+        echo "Cleaning project..."
+        xcodebuild clean -project tray-lang.xcodeproj -scheme tray-lang
+        echo "Project structure:"
         ls -la tray-lang/
         
     - name: Build for Intel
       run: |
         echo "Building for Intel architecture..."
-        xcodebuild -project tray-lang/tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         cp -r build/Release/tray-lang.app build/Release/tray-lang-intel.app
         echo "Intel build completed"
         
     - name: Build for Apple Silicon
       run: |
         echo "Building for Apple Silicon architecture..."
-        xcodebuild -project tray-lang/tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         cp -r build/Release/tray-lang.app build/Release/tray-lang-arm64.app
         echo "Apple Silicon build completed"
         
