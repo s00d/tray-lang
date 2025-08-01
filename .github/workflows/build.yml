@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14
 
     steps:
     - name: Checkout code
@@ -84,6 +84,49 @@ jobs:
         # List build artifacts
         ls -la build/Release/
 
+    - name: Get version from project
+      run: |
+        VERSION=$(xcodebuild -project tray-lang.xcodeproj -showBuildSettings | grep "MARKETING_VERSION" | awk '{print $3}')
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "Building version: $VERSION"
+        
+    - name: Create signing script
+      run: |
+        cat > build/Release/sign-app.sh << 'EOF'
+        #!/bin/bash
+        # Tray Lang - Application Signing Script
+        
+        echo "Tray Lang - Application Signing Script"
+        echo "======================================"
+        
+        # Check if app exists
+        if [ ! -d "tray-lang-universal.app" ]; then
+          echo "ERROR: tray-lang-universal.app not found in current directory"
+          exit 1
+        fi
+        
+        echo "1. Setting executable permissions..."
+        chmod +x tray-lang-universal.app
+        
+        echo "2. Removing quarantine attributes..."
+        xattr -cr tray-lang-universal.app
+        
+        echo "3. Signing application..."
+        codesign --force --deep --sign - tray-lang-universal.app
+        
+        echo "4. Verifying signature..."
+        codesign -dv tray-lang-universal.app
+        
+        echo "5. If macOS blocks execution, run:"
+        echo "   sudo xattr -rd com.apple.quarantine tray-lang-universal.app"
+        
+        echo ""
+        echo "Signing completed successfully!"
+        echo "You can now drag the app to Applications folder."
+        EOF
+        
+        chmod +x build/Release/sign-app.sh
+        
     - name: Create DMG
       run: |
         # Install create-dmg if not available
@@ -91,34 +134,69 @@ jobs:
           brew install create-dmg
         fi
         
-        # Create DMG
+        # Copy README to build directory
+        cp README.md build/Release/
+        
+        # Create DMG with app, README and signing script
         create-dmg \
-          --volname "Tray Lang" \
+          --volname "Tray Lang v$VERSION" \
           --window-pos 200 120 \
-          --window-size 600 300 \
+          --window-size 800 500 \
           --icon-size 100 \
           --icon "tray-lang-universal.app" 175 120 \
+          --icon "README.md" 375 120 \
+          --icon "sign-app.sh" 575 120 \
           --hide-extension "tray-lang-universal.app" \
-          --app-drop-link 425 120 \
-          "build/Release/Tray-Lang-Universal.dmg" \
+          --hide-extension "README.md" \
+          --hide-extension "sign-app.sh" \
+          --app-drop-link 175 300 \
+          --text-size 12 \
+          --text "README.md" 375 300 \
+          --text "sign-app.sh" 575 300 \
+          "build/Release/Tray-Lang-v$VERSION-Universal.dmg" \
           "build/Release/"
 
     - name: Upload Universal App
       uses: actions/upload-artifact@v4
       with:
-        name: tray-lang-universal
+        name: tray-lang-v${{ env.VERSION }}-universal
         path: |
           build/Release/tray-lang-universal.app
-          build/Release/Tray-Lang-Universal.dmg
+          build/Release/Tray-Lang-v${{ env.VERSION }}-Universal.dmg
+          build/Release/README.md
+          build/Release/sign-app.sh
         retention-days: 30
 
     - name: Create Release
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: v${{ env.VERSION }}
+        name: Tray Lang v${{ env.VERSION }}
+        body: |
+          ## Tray Lang v${{ env.VERSION }}
+          
+          ### What's New
+          - Universal binary for both Intel and Apple Silicon Macs
+          - Automatic keyboard layout switching
+          - Text transformation between Russian and English
+          
+          ### Installation
+          1. Download and mount the DMG
+          2. Run the signing script: `./sign-app.sh`
+          3. Drag the app to Applications folder
+          4. Grant accessibility permissions on first launch
+          
+          ### Files Included
+          - `tray-lang-universal.app` - Universal macOS application
+          - `README.md` - Installation and usage instructions
+          - `sign-app.sh` - Automatic signing script
+          
+          ### System Requirements
+          - macOS 14.0 or higher
+          - Intel or Apple Silicon Mac
         files: |
-          build/Release/tray-lang-universal.app
-          build/Release/Tray-Lang-Universal.dmg
+          build/Release/Tray-Lang-v${{ env.VERSION }}-Universal.dmg
         draft: false
         prerelease: false
       env:
