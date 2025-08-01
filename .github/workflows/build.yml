@@ -88,56 +88,6 @@ jobs:
         echo "VERSION=$VERSION" >> $GITHUB_ENV
         echo "Building version: $VERSION"
 
-    - name: Create signing script
-      run: |
-        cat > build/Release/sign-app.applescript << 'EOF'
-        display dialog "Tray Lang - Application Signing Script" & return & return & "This script will install and sign the application." buttons {"Cancel", "Install"} default button "Install" with icon note
-        
-        set appName to "tray-lang-universal.app"
-        set appsPath to "/Applications/"
-        set fullAppPath to appsPath & appName
-        
-        try
-            set currentDir to "tray-lang-universal.app"
-            if not (exists file currentDir) then
-                display dialog "ERROR: tray-lang-universal.app not found in current directory." & return & return & "Please make sure you're running this script from the DMG mount point." buttons {"OK"} default button "OK" with icon stop
-                return
-            end if
-            
-            do shell script "chmod +x tray-lang-universal.app"
-            do shell script "xattr -cr tray-lang-universal.app"
-            do shell script "codesign --force --deep --sign - tray-lang-universal.app"
-            do shell script "codesign -dv tray-lang-universal.app"
-            do shell script "cp -r tray-lang-universal.app /Applications/"
-            do shell script "chmod +x " & quoted form of fullAppPath
-            do shell script "xattr -cr " & quoted form of fullAppPath
-            do shell script "codesign --force --deep --sign - " & quoted form of fullAppPath
-            do shell script "codesign -dv " & quoted form of fullAppPath
-            
-            display dialog "Installation completed successfully!" & return & return & "The app is now installed in /Applications/tray-lang-universal.app" & return & return & "Don't forget to grant accessibility permissions in System Preferences!" buttons {"OK"} default button "OK" with icon note
-            
-            set openPrefs to button returned of (display dialog "Would you like to open System Preferences to grant accessibility permissions?" buttons {"No", "Yes"} default button "Yes")
-            if openPrefs is "Yes" then
-                tell application "System Preferences"
-                    activate
-                end tell
-            end if
-            
-        on error errMsg
-            display dialog "Error during installation: " & errMsg buttons {"OK"} default button "OK" with icon stop
-        end try
-        EOF
-        
-        cat > build/Release/sign-app.sh << 'EOF'
-        #!/bin/bash
-        # Wrapper script to run AppleScript
-        
-        echo "Running Tray Lang Installation Script..."
-        osascript "$(dirname "$0")/sign-app.applescript"
-        EOF
-        
-        chmod +x build/Release/sign-app.sh
-
     - name: Create DMG
       run: |
         # Install create-dmg if not available
@@ -145,10 +95,15 @@ jobs:
           brew install create-dmg
         fi
         
+        # Clean build directory and keep only what we need
+        rm -rf build/Release/tray-lang-intel.app
+        rm -rf build/Release/tray-lang-arm64.app
+        rm -f build/Release/tray-lang-universal
+        
         # Copy README to build directory
         cp README.md build/Release/
         
-        # Create DMG with app, README and signing script
+        # Create DMG with app and README only
         create-dmg \
           --volname "Tray Lang v$VERSION" \
           --window-pos 200 120 \
@@ -160,8 +115,6 @@ jobs:
           "build/Release/Tray-Lang-v$VERSION-Universal.dmg" \
           "build/Release/"
 
-
-
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
@@ -172,14 +125,12 @@ jobs:
           
           ### Installation
           1. Download and mount the DMG
-          2. Run the signing script: `./sign-app.sh`
-          3. The app will be automatically installed to Applications folder
-          4. Grant accessibility permissions on first launch
+          2. Move the app to Applications folder
+          3. Grant accessibility permissions on first launch
           
           ### Files Included
           - `tray-lang-universal.app` - Universal macOS application
           - `README.md` - Installation and usage instructions
-          - `sign-app.sh` - AppleScript-based installation script
           
           ### System Requirements
           - macOS 14.0 or higher
