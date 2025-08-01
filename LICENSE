@@ -2,22 +2,37 @@ Tray Lang License Agreement
 
 Copyright (c) 2025 s00d
 
-This software is provided "as is" for personal and commercial use. By using this software, you agree to the following terms:
+This software is provided "as is" for personal and non-commercial use only. By using this software, you agree to the following terms:
 
-PERMITTED USES:
-- You may use this software for personal and commercial purposes
-- You may distribute unmodified copies of this software
-- You may integrate this software into your own applications
+PERMITTED USES (NON-COMMERCIAL ONLY):
+- You may use this software for personal and non-commercial purposes only
+- You may distribute unmodified copies of this software for non-commercial purposes
+- You may integrate this software into your own applications for non-commercial use
 
 RESTRICTIONS:
+- You may NOT use this software for any commercial purposes without a commercial license
 - You may NOT modify, adapt, or create derivative works of this software
 - You may NOT reverse engineer, decompile, or disassemble this software
 - You may NOT remove or alter any copyright notices
+- You may NOT distribute modified versions of this software
 
 COMMERCIAL USE:
-- For commercial use, modification, or distribution of modified versions, a commercial license is required
+- Commercial use, modification, or distribution of modified versions requires a commercial license
 - Commercial licenses are available for purchase
 - Contact: virus191288@icloud.com for licensing information
+
+NON-COMMERCIAL USE DEFINITION:
+Non-commercial use means use that is not primarily intended for commercial advantage or monetary compensation. This includes:
+- Personal use
+- Educational use
+- Research use
+- Non-profit organization use
+
+Commercial use includes but is not limited to:
+- Use in for-profit businesses
+- Use in commercial software products
+- Use for monetary gain
+- Use in commercial services
 
 DISCLAIMER:
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
