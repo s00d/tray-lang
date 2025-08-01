@@ -89,7 +89,7 @@ jobs:
         VERSION=$(xcodebuild -project tray-lang.xcodeproj -showBuildSettings | grep "MARKETING_VERSION" | awk '{print $3}')
         echo "VERSION=$VERSION" >> $GITHUB_ENV
         echo "Building version: $VERSION"
-        
+
     - name: Create signing script
       run: |
         cat > build/Release/sign-app.sh << 'EOF'
@@ -126,7 +126,7 @@ jobs:
         EOF
         
         chmod +x build/Release/sign-app.sh
-        
+
     - name: Create DMG
       run: |
         # Install create-dmg if not available
@@ -152,7 +152,6 @@ jobs:
 
 
     - name: Create Release
-      if: github.event_name == 'release'
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v${{ env.VERSION }}
