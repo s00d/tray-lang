@@ -395,9 +395,18 @@ class TrayLangManager: ObservableObject {
         }
     }
     
-    private func updateAccessibilityStatus() {
+    func updateAccessibilityStatus() {
         let accessibilityEnabled = AXIsProcessTrusted()
+        let previousStatus = accessibilityStatus
         accessibilityStatus = accessibilityEnabled ? .granted : .denied
+        
+        // Если права только что получены, автоматически запускаем мониторинг
+        if accessibilityEnabled && previousStatus != .granted {
+            print("✅ Права получены! Автоматически запускаем мониторинг...")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.startMonitoring()
+            }
+        }
     }
     
     // MARK: - Setup Methods

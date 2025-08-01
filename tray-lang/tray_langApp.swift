@@ -77,6 +77,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         trayLangManager.stopMonitoring()
     }
     
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Проверяем права доступа при активации приложения
+        trayLangManager.updateAccessibilityStatus()
+    }
+    
     func showMainWindow() {
         NSApp.activate(ignoringOtherApps: true)
         
