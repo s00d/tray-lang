@@ -11,16 +11,16 @@ on:
 jobs:
   build:
     runs-on: macos-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Set up Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: '16.4'
-        
+        xcode-version: '16.2'
+
     - name: Clean and prepare
       run: |
         echo "Current directory structure:"
@@ -31,21 +31,21 @@ jobs:
         xcodebuild clean -project tray-lang.xcodeproj -scheme tray-lang
         echo "Project structure:"
         ls -la tray-lang/
-        
+
     - name: Build for Intel
       run: |
         echo "Building for Intel architecture..."
         xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         cp -r build/Release/tray-lang.app build/Release/tray-lang-intel.app
         echo "Intel build completed"
-        
+
     - name: Build for Apple Silicon
       run: |
         echo "Building for Apple Silicon architecture..."
         xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
         cp -r build/Release/tray-lang.app build/Release/tray-lang-arm64.app
         echo "Apple Silicon build completed"
-        
+
     - name: Create Universal Binary
       run: |
         # Create universal binary using lipo
@@ -59,7 +59,7 @@ jobs:
         
         # List build artifacts
         ls -la build/Release/
-        
+
     - name: Create DMG
       run: |
         # Install create-dmg if not available
@@ -78,7 +78,7 @@ jobs:
           --app-drop-link 425 120 \
           "build/Release/Tray-Lang-Universal.dmg" \
           "build/Release/"
-          
+
     - name: Upload Universal App
       uses: actions/upload-artifact@v4
       with:
@@ -87,7 +87,7 @@ jobs:
           build/Release/tray-lang-universal.app
           build/Release/Tray-Lang-Universal.dmg
         retention-days: 30
-        
+
     - name: Create Release
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v1
@@ -98,4 +98,4 @@ jobs:
         draft: false
         prerelease: false
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
