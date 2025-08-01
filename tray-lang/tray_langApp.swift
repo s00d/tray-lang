@@ -136,12 +136,4 @@ extension AppDelegate: NSWindowDelegate {
             hideDockIcon()
         }
     }
-    
-    func windowDidResignKey(_ notification: Notification) {
-        hideDockIcon()
-    }
-    
-    func windowDidBecomeKey(_ notification: Notification) {
-        showDockIcon()
-    }
 }
