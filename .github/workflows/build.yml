@@ -91,7 +91,7 @@ jobs:
     - name: Create signing script
       run: |
         cat > build/Release/sign-app.applescript << 'EOF'
-        -- Tray Lang - Application Signing Script (AppleScript)
+        (* Tray Lang - Application Signing Script (AppleScript) *)
         
         display dialog "Tray Lang - Application Signing Script" & return & return & "This script will install and sign the application." buttons {"Cancel", "Install"} default button "Install" with icon note
         
@@ -100,44 +100,44 @@ jobs:
         set fullAppPath to appsPath & appName
         
         try
-            -- Check if app exists in current directory
+            (* Check if app exists in current directory *)
             set currentDir to (path to desktop folder as text) & "tray-lang-universal.app"
             if not (exists file currentDir) then
                 display dialog "ERROR: tray-lang-universal.app not found in current directory." & return & return & "Please make sure you're running this script from the DMG mount point." buttons {"OK"} default button "OK" with icon stop
                 return
             end if
             
-            -- Step 1: Set executable permissions
+            (* Step 1: Set executable permissions *)
             do shell script "chmod +x " & quoted form of POSIX path of currentDir
             
-            -- Step 2: Remove quarantine attributes
+            (* Step 2: Remove quarantine attributes *)
             do shell script "xattr -cr " & quoted form of POSIX path of currentDir
             
-            -- Step 3: Sign application
+            (* Step 3: Sign application *)
             do shell script "codesign --force --deep --sign - " & quoted form of POSIX path of currentDir
             
-            -- Step 4: Verify signature
+            (* Step 4: Verify signature *)
             do shell script "codesign -dv " & quoted form of POSIX path of currentDir
             
-            -- Step 5: Copy to Applications folder
+            (* Step 5: Copy to Applications folder *)
             do shell script "cp -r " & quoted form of POSIX path of currentDir & " " & quoted form of appsPath
             
-            -- Step 6: Set permissions for Applications folder
+            (* Step 6: Set permissions for Applications folder *)
             do shell script "chmod +x " & quoted form of fullAppPath
             
-            -- Step 7: Remove quarantine attributes from Applications
+            (* Step 7: Remove quarantine attributes from Applications *)
             do shell script "xattr -cr " & quoted form of fullAppPath
             
-            -- Step 8: Sign application in Applications folder
+            (* Step 8: Sign application in Applications folder *)
             do shell script "codesign --force --deep --sign - " & quoted form of fullAppPath
             
-            -- Step 9: Final verification
+            (* Step 9: Final verification *)
             do shell script "codesign -dv " & quoted form of fullAppPath
             
-            -- Success message
+            (* Success message *)
             display dialog "Installation completed successfully!" & return & return & "The app is now installed in /Applications/tray-lang-universal.app" & return & return & "Don't forget to grant accessibility permissions in System Preferences!" buttons {"OK"} default button "OK" with icon note
             
-            -- Optional: Open System Preferences
+            (* Optional: Open System Preferences *)
             set openPrefs to button returned of (display dialog "Would you like to open System Preferences to grant accessibility permissions?" buttons {"No", "Yes"} default button "Yes")
             if openPrefs is "Yes" then
                 tell application "System Preferences"
@@ -152,7 +152,7 @@ jobs:
         end try
         EOF
         
-        -- Create a shell script wrapper for easy execution
+        (* Create a shell script wrapper for easy execution *)
         cat > build/Release/sign-app.sh << 'EOF'
         #!/bin/bash
         # Wrapper script to run AppleScript
