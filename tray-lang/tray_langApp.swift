@@ -35,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         print("🚀 Приложение запущено")
         setupStatusItem()
+        hideDockIcon() // Скрываем иконку в доке при запуске
     }
     
     func setupStatusItem() {
@@ -107,6 +108,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             mainWindow = window
         }
+        
+        // Показываем иконку в доке
+        showDockIcon()
+    }
+    
+    func hideDockIcon() {
+        NSApp.setActivationPolicy(.accessory)
+    }
+    
+    func showDockIcon() {
+        NSApp.setActivationPolicy(.regular)
     }
 }
 
@@ -114,12 +126,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        hideDockIcon()
         return false
     }
     
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow, window == mainWindow {
             mainWindow = nil
+            hideDockIcon()
         }
+    }
+    
+    func windowDidResignKey(_ notification: Notification) {
+        hideDockIcon()
+    }
+    
+    func windowDidBecomeKey(_ notification: Notification) {
+        showDockIcon()
     }
 }
