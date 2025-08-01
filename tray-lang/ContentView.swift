@@ -191,7 +191,7 @@ struct ContentView: View {
                     
                     Button("Transform") {
                         let isRussian = trayLangManager.detectLanguage(testText)
-                        transformedText = trayLangManager.transformText(testText, fromRussian: isRussian)
+                        transformedText = trayLangManager.transformText(testText)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(testText.isEmpty)
