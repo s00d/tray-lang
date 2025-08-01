@@ -812,13 +812,13 @@ class TrayLangManager: ObservableObject {
     private func replaceSelectedText(with newText: String) {
         print("📝 Заменяем выделенный текст на: \(newText)")
         
-        // Метод 1: Попытка заменить через Accessibility API
-        if replaceTextViaAccessibility(newText) {
+        // Метод 1: Попытка заменить через улучшенную логику (наиболее надежный)
+        if replaceTextWithImprovedLogic(newText) {
             return
         }
         
-        // Метод 2: Попытка заменить через системные API
-        if replaceTextViaSystemAPI(newText) {
+        // Метод 2: Попытка заменить через Accessibility API (резервный)
+        if replaceTextViaAccessibility(newText) {
             return
         }
         
@@ -842,17 +842,32 @@ class TrayLangManager: ObservableObject {
             return false
         }
         
-        // Устанавливаем новый текст
-        let textValue = newText as CFString
-        let setResult = AXUIElementSetAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, textValue)
+        // Пытаемся получить текущий текст для проверки
+        var currentText: CFTypeRef?
+        let getResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &currentText)
         
-        if setResult == .success {
-            print("✅ Текст успешно заменен через Accessibility API")
-            return true
-        } else {
-            print("❌ Не удалось заменить текст через Accessibility API")
-            return false
+        if getResult == .success, let text = currentText as? String {
+            print("📋 Текущий текст элемента: \(text)")
+            
+            // Пытаемся получить выделенный текст
+            var selectedText: CFTypeRef?
+            let selectedResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedText)
+            
+            if selectedResult == .success, let selected = selectedText as? String, !selected.isEmpty {
+                print("📋 Выделенный текст: \(selected)")
+                
+                // Заменяем выделенный текст на новый
+                let setResult = AXUIElementSetAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, newText as CFString)
+                
+                if setResult == .success {
+                    print("✅ Выделенный текст успешно заменен через Accessibility API")
+                    return true
+                }
+            }
         }
+        
+        print("❌ Не удалось заменить текст через Accessibility API")
+        return false
     }
     
 
@@ -860,12 +875,12 @@ class TrayLangManager: ObservableObject {
     private func getSelectedTextViaHotkeys() -> String? {
         print("📋 Пытаемся получить текст через AppleScript...")
         
-        // Используем AppleScript для получения выделенного текста
+        // Используем AppleScript для получения выделенного текста с сохранением позиции
         let script = """
         tell application "System Events"
             set originalClipboard to the clipboard
             try
-                -- Копируем выделенный текст
+                -- Копируем выделенный текст (Cmd+C)
                 key code 8 using {command down}
                 delay 0.1
                 set selectedText to the clipboard
@@ -905,23 +920,39 @@ class TrayLangManager: ObservableObject {
         return nil
     }
     
-    private func replaceTextViaSystemAPI(_ newText: String) -> Bool {
-        print("🔍 Пытаемся заменить текст через AppleScript...")
+
+    
+    // MARK: - Improved Text Replacement
+    private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
+        print("🔍 Пытаемся заменить текст с улучшенной логикой...")
         
-        // Используем AppleScript для замены текста
+        // Используем AppleScript для замены текста с более продвинутой обработкой выделения
         let script = """
         tell application "System Events"
             set originalClipboard to the clipboard
             try
-                -- Помещаем новый текст в буфер обмена
-                set the clipboard to "\(newText)"
+                -- Проверяем, есть ли выделенный текст
+                key code 8 using {command down}
                 delay 0.1
-                -- Вставляем текст через Cmd+V
-                key code 9 using {command down}
-                delay 0.1
-                -- Восстанавливаем оригинальный буфер обмена
-                set the clipboard to originalClipboard
-                return "success"
+                set selectedText to the clipboard
+                
+                if selectedText is not equal to originalClipboard then
+                    -- Есть выделенный текст, заменяем его
+                    set the clipboard to "\(newText)"
+                    delay 0.1
+                    key code 9 using {command down}
+                    delay 0.1
+                    set the clipboard to originalClipboard
+                    return "success"
+                else
+                    -- Нет выделенного текста, просто вставляем
+                    set the clipboard to "\(newText)"
+                    delay 0.1
+                    key code 9 using {command down}
+                    delay 0.1
+                    set the clipboard to originalClipboard
+                    return "success"
+                end if
             on error
                 -- Восстанавливаем оригинальный буфер обмена в случае ошибки
                 set the clipboard to originalClipboard
@@ -944,7 +975,7 @@ class TrayLangManager: ObservableObject {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 if output == "success" {
-                    print("✅ Текст успешно заменен через AppleScript")
+                    print("✅ Текст успешно заменен с улучшенной логикой")
                     return true
                 }
             }
