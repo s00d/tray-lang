@@ -1,0 +1,83 @@
+name: Build Universal macOS App
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '15.2'
+        
+    - name: Build for Intel
+      run: |
+        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build
+        cp -r build/Release/tray-lang.app build/Release/tray-lang-intel.app
+        
+    - name: Build for Apple Silicon
+      run: |
+        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build
+        cp -r build/Release/tray-lang.app build/Release/tray-lang-arm64.app
+        
+    - name: Create Universal Binary
+      run: |
+        # Create universal binary using lipo
+        lipo -create build/Release/tray-lang-intel.app/Contents/MacOS/tray-lang build/Release/tray-lang-arm64.app/Contents/MacOS/tray-lang -output build/Release/tray-lang-universal
+        
+        # Copy the universal binary to the Intel app
+        cp build/Release/tray-lang-universal build/Release/tray-lang-intel.app/Contents/MacOS/tray-lang
+        
+        # Create final universal app
+        cp -r build/Release/tray-lang-intel.app build/Release/tray-lang-universal.app
+        
+    - name: Create DMG
+      run: |
+        # Install create-dmg if not available
+        if ! command -v create-dmg &> /dev/null; then
+          brew install create-dmg
+        fi
+        
+        # Create DMG
+        create-dmg \
+          --volname "Tray Lang" \
+          --window-pos 200 120 \
+          --window-size 600 300 \
+          --icon-size 100 \
+          --icon "tray-lang-universal.app" 175 120 \
+          --hide-extension "tray-lang-universal.app" \
+          --app-drop-link 425 120 \
+          "build/Release/Tray-Lang-Universal.dmg" \
+          "build/Release/"
+          
+    - name: Upload Universal App
+      uses: actions/upload-artifact@v4
+      with:
+        name: tray-lang-universal
+        path: |
+          build/Release/tray-lang-universal.app
+          build/Release/Tray-Lang-Universal.dmg
+        retention-days: 30
+        
+    - name: Create Release
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          build/Release/tray-lang-universal.app
+          build/Release/Tray-Lang-Universal.dmg
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
