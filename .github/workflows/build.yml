@@ -36,14 +36,18 @@ jobs:
       run: |
         echo "Building for Intel architecture..."
         xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-        cp -r build/Release/tray-lang.app build/Release/tray-lang-intel.app
+        mkdir -p build/Release
+        find . -name "tray-lang.app" -type d
+        cp -r $(find . -name "tray-lang.app" -type d | head -1) build/Release/tray-lang-intel.app
         echo "Intel build completed"
 
     - name: Build for Apple Silicon
       run: |
         echo "Building for Apple Silicon architecture..."
         xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-        cp -r build/Release/tray-lang.app build/Release/tray-lang-arm64.app
+        mkdir -p build/Release
+        find . -name "tray-lang.app" -type d
+        cp -r $(find . -name "tray-lang.app" -type d | head -1) build/Release/tray-lang-arm64.app
         echo "Apple Silicon build completed"
 
     - name: Create Universal Binary
