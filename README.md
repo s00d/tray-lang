@@ -176,7 +176,7 @@ The app includes debug logging. Check the Console app for detailed information a
 
 ## License
 
-© 2024 All rights reserved
+© 2025 All rights reserved
 
 ## Developer
 
