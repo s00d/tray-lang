@@ -4,6 +4,7 @@ import Carbon
 import ApplicationServices
 import SwiftUI
 import UserNotifications
+import ServiceManagement
 
 // MARK: - Key Information Structure
 struct KeyInfo {
@@ -455,6 +456,8 @@ class TrayLangManager: ObservableObject {
             print("🛑 Мониторинг горячих клавиш остановлен")
         }
     }
+    
+
     
     private func handleKeyEvent(_ event: CGEvent) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
@@ -1052,72 +1055,23 @@ class TrayLangManager: ObservableObject {
     
     // MARK: - Auto Launch
     func enableAutoLaunch() {
-        // Используем современный способ через ServiceManagement
-        let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "os.s00d.tray-lang"
-        
-        // Создаем Launch Agent
-        let launchAgentDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents")
-        
-        // Создаем директорию если её нет
-        try? FileManager.default.createDirectory(at: launchAgentDir, withIntermediateDirectories: true)
-        
-        let plistPath = launchAgentDir.appendingPathComponent("\(appBundleIdentifier).plist")
-        
-        let plistContent = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>\(appBundleIdentifier)</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>\(Bundle.main.executablePath ?? "")</string>
-            </array>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>KeepAlive</key>
-            <true/>
-            <key>ProcessType</key>
-            <string>Interactive</string>
-        </dict>
-        </plist>
-        """
-        
         do {
-            try plistContent.write(to: plistPath, atomically: true, encoding: .utf8)
-            
-            // Загружаем Launch Agent
-            let process = Process()
-            process.launchPath = "/bin/launchctl"
-            process.arguments = ["load", plistPath.path]
-            try process.run()
-            process.waitUntilExit()
+            // Используем современный SMAppService
+            let appService = SMAppService.mainApp
+            try appService.register()
             
             UserDefaults.standard.set(true, forKey: "autoLaunchEnabled")
-            print("✅ Автозапуск включен")
+            print("✅ Автозапуск включен через SMAppService")
         } catch {
             print("❌ Ошибка включения автозапуска: \(error)")
         }
     }
     
     func disableAutoLaunch() {
-        let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "os.s00d.tray-lang"
-        let launchAgentDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents")
-        let plistPath = launchAgentDir.appendingPathComponent("\(appBundleIdentifier).plist")
-        
         do {
-            // Выгружаем Launch Agent
-            let process = Process()
-            process.launchPath = "/bin/launchctl"
-            process.arguments = ["unload", plistPath.path]
-            try process.run()
-            process.waitUntilExit()
-            
-            // Удаляем файл
-            try FileManager.default.removeItem(at: plistPath)
+            // Отключаем автозапуск через SMAppService
+            let appService = SMAppService.mainApp
+            try appService.unregister()
             
             UserDefaults.standard.set(false, forKey: "autoLaunchEnabled")
             print("✅ Автозапуск отключен")
@@ -1127,12 +1081,14 @@ class TrayLangManager: ObservableObject {
     }
     
     func isAutoLaunchEnabled() -> Bool {
-        let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "os.s00d.tray-lang"
-        let launchAgentDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents")
-        let plistPath = launchAgentDir.appendingPathComponent("\(appBundleIdentifier).plist")
-        
-        return FileManager.default.fileExists(atPath: plistPath.path)
+        do {
+            // Проверяем статус через SMAppService
+            let appService = SMAppService.mainApp
+            return appService.status == .enabled
+        } catch {
+            // Если не удалось проверить, используем UserDefaults
+            return UserDefaults.standard.bool(forKey: "autoLaunchEnabled")
+        }
     }
 
     func addSymbolMapping(from: String, to: String) {

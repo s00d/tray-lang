@@ -127,13 +127,8 @@ struct TrayMenuView: View {
     }
     
     private func openHotKeyEditorWindow() {
-        // Проверяем, открыто ли главное окно
-        if let mainWindow = NSApp.windows.first(where: { $0.title == "Tray Lang" }) {
-            mainWindow.makeKeyAndOrderFront(nil)
-        } else {
-            // Если окно не открыто, сначала открываем его
-            showMainWindow()
-        }
+        // Сначала показываем главное окно
+        showMainWindow()
         
         // Отправляем уведомление для открытия редактора горячих клавиш
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -142,13 +137,8 @@ struct TrayMenuView: View {
     }
     
     private func openSymbolsEditorWindow() {
-        // Проверяем, открыто ли главное окно
-        if let mainWindow = NSApp.windows.first(where: { $0.title == "Tray Lang" }) {
-            mainWindow.makeKeyAndOrderFront(nil)
-        } else {
-            // Если окно не открыто, сначала открываем его
-            showMainWindow()
-        }
+        // Сначала показываем главное окно
+        showMainWindow()
         
         // Отправляем уведомление для открытия редактора символов
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -157,13 +147,8 @@ struct TrayMenuView: View {
     }
     
     private func showAboutWindow() {
-        // Проверяем, открыто ли главное окно
-        if let mainWindow = NSApp.windows.first(where: { $0.title == "Tray Lang" }) {
-            mainWindow.makeKeyAndOrderFront(nil)
-        } else {
-            // Если окно не открыто, сначала открываем его
-            showMainWindow()
-        }
+        // Сначала показываем главное окно
+        showMainWindow()
         
         // Отправляем уведомление для показа окна About
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

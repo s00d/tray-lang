@@ -16,7 +16,7 @@ struct ContentView: View {
     @State private var showingAboutWindow = false
     @State private var testText = ""
     @State private var transformedText = ""
-    @State private var autoLaunchEnabled = UserDefaults.standard.bool(forKey: "autoLaunchEnabled")
+
     @State private var selectedTab = 0
 
     var body: some View {
@@ -123,32 +123,7 @@ struct ContentView: View {
                 .background(Color(NSColor.controlBackgroundColor))
                 .cornerRadius(12)
                 
-                // Auto-launch
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Auto-launch")
-                            .font(.headline)
-                        Text("Start with system")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Toggle("", isOn: $autoLaunchEnabled)
-                        .onChange(of: autoLaunchEnabled) { _, newValue in
-                            if NSApplication.shared.delegate is AppDelegate {
-                                if newValue {
-                                    trayLangManager.enableAutoLaunch()
-                                } else {
-                                    trayLangManager.disableAutoLaunch()
-                                }
-                            }
-                        }
-                }
-                .padding()
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(12)
+
                 
                 // Permissions
                 VStack(alignment: .leading, spacing: 12) {

@@ -98,17 +98,17 @@ jobs:
         set fullAppPath to appsPath & appName
         
         try
-            set currentDir to (path to desktop folder as text) & "tray-lang-universal.app"
+            set currentDir to "tray-lang-universal.app"
             if not (exists file currentDir) then
                 display dialog "ERROR: tray-lang-universal.app not found in current directory." & return & return & "Please make sure you're running this script from the DMG mount point." buttons {"OK"} default button "OK" with icon stop
                 return
             end if
             
-            do shell script "chmod +x " & quoted form of POSIX path of currentDir
-            do shell script "xattr -cr " & quoted form of POSIX path of currentDir
-            do shell script "codesign --force --deep --sign - " & quoted form of POSIX path of currentDir
-            do shell script "codesign -dv " & quoted form of POSIX path of currentDir
-            do shell script "cp -r " & quoted form of POSIX path of currentDir & " " & quoted form of appsPath
+            do shell script "chmod +x tray-lang-universal.app"
+            do shell script "xattr -cr tray-lang-universal.app"
+            do shell script "codesign --force --deep --sign - tray-lang-universal.app"
+            do shell script "codesign -dv tray-lang-universal.app"
+            do shell script "cp -r tray-lang-universal.app /Applications/"
             do shell script "chmod +x " & quoted form of fullAppPath
             do shell script "xattr -cr " & quoted form of fullAppPath
             do shell script "codesign --force --deep --sign - " & quoted form of fullAppPath
