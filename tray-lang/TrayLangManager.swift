@@ -324,6 +324,7 @@ class TrayLangManager: ObservableObject {
     private var runLoopSource: CFRunLoopSource?
     private var keyCaptureEventTap: CFMachPort?
     private var keyCaptureRunLoopSource: CFRunLoopSource?
+    private var notificationWindow: NSWindow?
     @Published var fromToMapping: [String: String] = [
         // Русская раскладка → Английская раскладка (строчные)
         "й": "q", "ц": "w", "у": "e", "к": "r", "е": "t", "н": "y", "г": "u", "ш": "i", "щ": "o", "з": "p",
@@ -341,9 +342,9 @@ class TrayLangManager: ObservableObject {
         
         // Цифры и символы
         "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "0": "0",
-        "-": "-", "=": "=", "[": "[", "]": "]", "\\": "\\", ";": ";", "'": "'", ",": ",", ".": ".", "/": "/",
+        "-": "-", "=": "=", "[": "[", "]": "]", "\\": "\\", "'": "'", ",": ",", ".": ".", "/": "/",
         "!": "!", "@": "@", "#": "#", "$": "$", "%": "%", "^": "^", "&": "&", "*": "*", "(": "(", ")": ")",
-        "_": "_", "+": "+", "{": "{", "}": "}", "|": "|", ":": ":", "\"": "\"", "<": "<", ">": ">", "?": "?",
+        "_": "_", "+": "+", "{": "{", "}": "}", "|": "|", "\"": "\"", "<": "<", ">": ">", "?": "?",
         "~": "~", "`": "`", "№": "#"
     ]
     // Автоматически созданная инверсия fromToMapping
@@ -1010,6 +1011,9 @@ class TrayLangManager: ObservableObject {
     func performLayoutSwitch() {
         print("🔄 Выполняем переключение раскладки...")
         
+        // Показываем уведомление о начале конвертации
+        showConversionNotification()
+        
         // Проверяем разрешения на доступность
         if !AXIsProcessTrusted() {
             print("⚠️ Требуются разрешения на доступность")
@@ -1042,6 +1046,77 @@ class TrayLangManager: ObservableObject {
         switchKeyboardLayout()
         
         print("✅ Переключение раскладки завершено")
+    }
+    
+    // MARK: - Conversion Notification
+    private func showConversionNotification() {
+        DispatchQueue.main.async {
+            // Создаем окно только один раз
+            if self.notificationWindow == nil {
+                self.createNotificationWindow()
+            }
+            
+            guard let window = self.notificationWindow else { return }
+            
+            // Сбрасываем прозрачность
+            window.alphaValue = 1.0
+            
+            // Показываем окно
+            window.orderFront(nil)
+            
+            // Автоматически скрываем через 0.5 секунды
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // Просто скрываем окно без анимации
+                window.orderOut(nil)
+            }
+        }
+    }
+    
+    private func createNotificationWindow() {
+        // Создаем окно уведомления
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 60),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        
+        // Настраиваем окно
+        window.level = .floating
+        window.backgroundColor = NSColor.clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.ignoresMouseEvents = true
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        
+        // Создаем контейнер с простым цветом
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 60))
+        containerView.wantsLayer = true
+        containerView.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.4).cgColor
+        containerView.layer?.cornerRadius = 12
+        containerView.layer?.masksToBounds = true
+        
+        // Создаем контент
+        let label = NSTextField(labelWithString: "🔄 Converting layout...")
+        label.textColor = NSColor.white
+        label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        label.alignment = .center
+        label.frame = NSRect(x: 20, y: 20, width: 240, height: 20)
+        
+        // Добавляем элементы в контейнер
+        containerView.addSubview(label)
+        window.contentView = containerView
+        
+        // Размещаем по центру экрана
+        if let screen = NSScreen.main {
+            let screenFrame = screen.frame
+            let windowFrame = window.frame
+            let x = (screenFrame.width - windowFrame.width) / 2
+            let y = (screenFrame.height - windowFrame.height) / 2
+            window.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+        
+        self.notificationWindow = window
     }
     
     private func switchKeyboardLayout() {
