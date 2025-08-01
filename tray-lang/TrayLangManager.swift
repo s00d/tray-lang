@@ -325,13 +325,28 @@ class TrayLangManager: ObservableObject {
     private var keyCaptureEventTap: CFMachPort?
     private var keyCaptureRunLoopSource: CFRunLoopSource?
     @Published var fromToMapping: [String: String] = [
+        // Русская раскладка → Английская раскладка (строчные)
         "й": "q", "ц": "w", "у": "e", "к": "r", "е": "t", "н": "y", "г": "u", "ш": "i", "щ": "o", "з": "p",
         "ф": "a", "ы": "s", "в": "d", "а": "f", "п": "g", "р": "h", "о": "j", "л": "k", "д": "l",
-        "я": "z", "ч": "x", "с": "c", "м": "v", "и": "b", "т": "n", "ь": "m",
+        "я": "z", "ч": "x", "с": "c", "м": "v", "и": "b", "т": "n",
+        
+        // Русская раскладка → Английская раскладка (заглавные)
         "Й": "Q", "Ц": "W", "У": "E", "К": "R", "Е": "T", "Н": "Y", "Г": "U", "Ш": "I", "Щ": "O", "З": "P",
         "Ф": "A", "Ы": "S", "В": "D", "А": "F", "П": "G", "Р": "H", "О": "J", "Л": "K", "Д": "L",
-        "Я": "Z", "Ч": "X", "С": "C", "М": "V", "И": "B", "Т": "N", "Ь": "M"
+        "Я": "Z", "Ч": "X", "С": "C", "М": "V", "И": "B", "Т": "N",
+        
+        // Специальные символы
+        "ё": "`", "ъ": "'", "э": "[", "х": "]", "ж": ";", "ь": "m", "б": ",", "ю": ".",
+        "Ё": "~", "Ъ": "\"", "Э": "{", "Х": "}", "Ж": ":", "Ь": "M", "Б": "<", "Ю": ">",
+        
+        // Цифры и символы
+        "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "0": "0",
+        "-": "-", "=": "=", "[": "[", "]": "]", "\\": "\\", ";": ";", "'": "'", ",": ",", ".": ".", "/": "/",
+        "!": "!", "@": "@", "#": "#", "$": "$", "%": "%", "^": "^", "&": "&", "*": "*", "(": "(", ")": ")",
+        "_": "_", "+": "+", "{": "{", "}": "}", "|": "|", ":": ":", "\"": "\"", "<": "<", ">": ">", "?": "?",
+        "~": "~", "`": "`", "№": "#"
     ]
+    // Автоматически созданная инверсия fromToMapping
     private var toFromMapping: [String: String] = [:]
     
     // MARK: - Initialization
@@ -411,8 +426,14 @@ class TrayLangManager: ObservableObject {
     
     // MARK: - Setup Methods
     private func setupToFromMapping() {
+        toFromMapping.removeAll()
         for (from, to) in fromToMapping {
-            toFromMapping[to] = from
+            // Проверяем, что нет конфликтов
+            if toFromMapping[to] == nil {
+                toFromMapping[to] = from
+            } else {
+                print("⚠️ Конфликт в маппинге: '\(to)' уже используется")
+            }
         }
     }
     
@@ -667,38 +688,22 @@ class TrayLangManager: ObservableObject {
     }
     
     // MARK: - Text Transformation
-    func transformText(_ text: String, fromRussian: Bool) -> String {
+    func transformText(_ text: String) -> String {
         var result = ""
         
         for char in text {
             let charString = String(char)
             
-            // Проверяем, является ли символ буквой
-            if char.isLetter {
-                // Определяем язык для каждой буквы отдельно
-                let isRussianChar = isRussianCharacter(charString)
-                let isEnglishChar = isEnglishCharacter(charString)
-                
-                if isRussianChar {
-                    // Русская буква - переводим в английскую
-                    if let mapped = fromToMapping[charString] {
-                        result += mapped
-                    } else {
-                        result += charString // Оставляем как есть, если нет соответствия
-                    }
-                } else if isEnglishChar {
-                    // Английская буква - переводим в русскую
-                    if let mapped = toFromMapping[charString] {
-                        result += mapped
-                    } else {
-                        result += charString // Оставляем как есть, если нет соответствия
-                    }
-                } else {
-                    // Неизвестная буква - оставляем как есть
-                    result += charString
-                }
+            // Сначала пробуем конвертировать русские в английские
+            if let mapped = fromToMapping[charString] {
+                print("✅ Конвертируем русский '\(charString)' → английский '\(mapped)'")
+                result += mapped
+            } else if let mapped = toFromMapping[charString] {
+                // Если не нашли в fromToMapping, пробуем английские в русские
+                print("✅ Конвертируем английский '\(charString)' → русский '\(mapped)'")
+                result += mapped
             } else {
-                // Не буква - оставляем как есть
+                // Если нет в маппинге - оставляем как есть
                 result += charString
             }
         }
@@ -707,13 +712,13 @@ class TrayLangManager: ObservableObject {
     }
     
     private func isRussianCharacter(_ char: String) -> Bool {
-        let lowerChar = char.lowercased()
-        return fromToMapping.keys.contains(lowerChar)
+        // Проверяем, есть ли символ в маппинге русской раскладки
+        return fromToMapping.keys.contains(char)
     }
     
     private func isEnglishCharacter(_ char: String) -> Bool {
-        let lowerChar = char.lowercased()
-        return toFromMapping.keys.contains(lowerChar)
+        // Проверяем, есть ли символ в маппинге английской раскладки
+        return toFromMapping.keys.contains(char)
     }
     
     private func determineTextLanguage(_ text: String) -> Bool {
@@ -730,10 +735,7 @@ class TrayLangManager: ObservableObject {
         return determineTextLanguage(text)
     }
     
-    private func transformText(_ text: String) -> String {
-        // Новая логика - каждая буква обрабатывается отдельно
-        return transformText(text, fromRussian: false) // fromRussian больше не используется
-    }
+
     
     private func getSelectedText() -> String? {
         print("🔍 Получаем выделенный текст через Accessibility API...")
