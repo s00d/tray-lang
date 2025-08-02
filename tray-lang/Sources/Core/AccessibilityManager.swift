@@ -42,6 +42,8 @@ class AccessibilityManager: ObservableObject {
     @Published var accessibilityStatus: AccessibilityStatus = .unknown
     
     private var statusCheckTimer: Timer?
+    private var isRequestingPermissions = false
+    private var permissionAlert: NSAlert?
     
     init() {
         updateAccessibilityStatus()
@@ -59,29 +61,53 @@ class AccessibilityManager: ObservableObject {
     }
     
     private func startStatusMonitoring() {
-        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.updateAccessibilityStatus()
+        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.checkAccessibilityStatus()
+        }
+    }
+    
+    private func checkAccessibilityStatus() {
+        let wasGranted = accessibilityStatus == .granted
+        updateAccessibilityStatus()
+        
+        // Если права только что были предоставлены, уведомляем об этом
+        if !wasGranted && accessibilityStatus == .granted {
+            print("✅ Права доступа предоставлены!")
+            NotificationCenter.default.post(name: .accessibilityGranted, object: nil)
         }
     }
     
     // MARK: - Permission Request
     func requestAccessibilityPermissions() {
-        accessibilityStatus = .requesting
+        // Проверяем, не запрашиваем ли уже права
+        guard !isRequestingPermissions else {
+            print("⚠️ Запрос прав уже выполняется")
+            return
+        }
         
         let accessibilityEnabled = AXIsProcessTrusted()
         
-        if !accessibilityEnabled {
-            print("⚠️ Запрашиваем разрешения на доступность...")
-            
-            DispatchQueue.main.async {
-                self.showPermissionAlert()
-            }
-        } else {
+        if accessibilityEnabled {
             accessibilityStatus = .granted
+            return
+        }
+        
+        isRequestingPermissions = true
+        accessibilityStatus = .requesting
+        
+        print("⚠️ Запрашиваем разрешения на доступность...")
+        
+        DispatchQueue.main.async {
+            self.showPermissionAlert()
         }
     }
     
     private func showPermissionAlert() {
+        // Закрываем предыдущий алерт если он открыт
+        if let existingAlert = permissionAlert {
+            existingAlert.window.close()
+        }
+        
         let alert = NSAlert()
         alert.messageText = "Разрешения на доступность"
         alert.informativeText = "Для работы горячих клавиш необходимо разрешить доступ к системе. Нажмите 'Открыть настройки' и добавьте это приложение в список разрешенных в разделе 'Доступность'."
@@ -89,9 +115,17 @@ class AccessibilityManager: ObservableObject {
         alert.addButton(withTitle: "Открыть настройки")
         alert.addButton(withTitle: "Отмена")
         
+        permissionAlert = alert
+        
         let response = alert.runModal()
+        permissionAlert = nil
+        isRequestingPermissions = false
+        
         if response == .alertFirstButtonReturn {
             openSystemPreferences()
+        } else {
+            // Если пользователь отменил, обновляем статус
+            updateAccessibilityStatus()
         }
     }
     
@@ -105,4 +139,9 @@ class AccessibilityManager: ObservableObject {
     func isAccessibilityGranted() -> Bool {
         return AXIsProcessTrusted()
     }
+}
+
+// MARK: - Notifications
+extension Notification.Name {
+    static let accessibilityGranted = Notification.Name("accessibilityGranted")
 } 
