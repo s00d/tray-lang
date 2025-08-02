@@ -20,22 +20,26 @@ struct tray_langApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem?
-    var popover: NSPopover?
-    var mainWindow: NSWindow?
-    var isInitialized = false
-    lazy var trayLangManager: TrayLangManager = {
-        let manager = TrayLangManager()
-        return manager
-    }()
+    private var isInitialized = false
+    private var coordinator: AppCoordinator!
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !isInitialized else { return }
         isInitialized = true
         
-        print("🚀 Приложение запущено")
+        // Инициализируем координатор
+        coordinator = AppCoordinator()
+        
+        // Скрываем иконку в доке сразу при запуске
+        coordinator.hideDockIcon()
+        
+        // Настраиваем UI
         setupStatusItem()
-        hideDockIcon() // Скрываем иконку в доке при запуске
+        
+        // Запускаем приложение
+        coordinator.start()
     }
     
     func setupStatusItem() {
@@ -49,24 +53,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
         
+        setupPopover()
+    }
+    
+    private func setupPopover() {
         popover = NSPopover()
         popover?.contentSize = NSSize(width: 250, height: 300)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(
-            rootView: TrayMenuView(trayLangManager: trayLangManager, showMainWindow: showMainWindow)
+            rootView: TrayMenuView(coordinator: coordinator)
         )
     }
     
-    @objc func togglePopover() {
-        if let button = statusItem?.button {
-            if popover?.isShown == true {
-                popover?.performClose(nil)
-            } else {
-                popover?.contentViewController = NSHostingController(
-                    rootView: TrayMenuView(trayLangManager: trayLangManager, showMainWindow: showMainWindow)
-                )
-                popover?.show(relativeTo: button.bounds, of: button, preferredEdge: NSRectEdge.minY)
-            }
+    @objc private func togglePopover() {
+        guard let button = statusItem?.button else { return }
+        
+        // Принудительно скрываем иконку в доке
+        coordinator.hideDockIcon()
+        
+        if popover?.isShown == true {
+            popover?.performClose(nil)
+        } else {
+            popover?.contentViewController = NSHostingController(
+                rootView: TrayMenuView(coordinator: coordinator)
+            )
+            popover?.show(relativeTo: button.bounds, of: button, preferredEdge: NSRectEdge.minY)
         }
     }
     
@@ -75,65 +86,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        trayLangManager.stopMonitoring()
+        coordinator.stop()
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Проверяем права доступа при активации приложения
-        trayLangManager.updateAccessibilityStatus()
-    }
-    
-    func showMainWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        
-        if let window = mainWindow {
-            window.makeKeyAndOrderFront(nil)
-            window.orderFront(nil)
-        } else {
-            let contentView = ContentView()
-                .environmentObject(trayLangManager)
-            
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Tray Lang"
-            window.delegate = self
-            window.contentView = NSHostingView(rootView: contentView)
-            window.center()
-            window.makeKeyAndOrderFront(nil)
-            window.orderFront(nil)
-            
-            mainWindow = window
-        }
-        
-        // Показываем иконку в доке
-        showDockIcon()
-    }
-    
-    func hideDockIcon() {
-        NSApp.setActivationPolicy(.accessory)
-    }
-    
-    func showDockIcon() {
-        NSApp.setActivationPolicy(.regular)
-    }
-}
-
-// MARK: - NSWindowDelegate
-extension AppDelegate: NSWindowDelegate {
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        sender.orderOut(nil)
-        hideDockIcon()
-        return false
-    }
-    
-    func windowWillClose(_ notification: Notification) {
-        if let window = notification.object as? NSWindow, window == mainWindow {
-            mainWindow = nil
-            hideDockIcon()
-        }
+        coordinator.accessibilityManager.updateAccessibilityStatus()
+        // Принудительно скрываем иконку в доке при активации
+        coordinator.hideDockIcon()
     }
 }
