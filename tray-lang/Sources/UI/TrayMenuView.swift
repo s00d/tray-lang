@@ -9,23 +9,17 @@ import SwiftUI
 import AppKit
 
 struct TrayMenuView: View {
-    @StateObject private var trayLangManager: TrayLangManager
-    let showMainWindow: () -> Void
+    @StateObject private var coordinator: AppCoordinator
     
-    init(trayLangManager: TrayLangManager? = nil, showMainWindow: @escaping () -> Void) {
-        if let manager = trayLangManager {
-            self._trayLangManager = StateObject(wrappedValue: manager)
-        } else {
-            self._trayLangManager = StateObject(wrappedValue: TrayLangManager())
-        }
-        self.showMainWindow = showMainWindow
+    init(coordinator: AppCoordinator) {
+        self._coordinator = StateObject(wrappedValue: coordinator)
     }
     
     var body: some View {
         VStack(spacing: 0) {
             // Layout status
             HStack {
-                Text("Layout: \(trayLangManager.currentLayout)")
+                Text("Layout: \(coordinator.keyboardLayoutManager.currentLayout)")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Spacer()
@@ -66,12 +60,12 @@ struct TrayMenuView: View {
                 
                 HStack {
                     Toggle("Auto Launch", isOn: Binding(
-                        get: { trayLangManager.isAutoLaunchEnabled() },
+                        get: { coordinator.autoLaunchManager.isAutoLaunchEnabled() },
                         set: { newValue in
                             if newValue {
-                                trayLangManager.enableAutoLaunch()
+                                coordinator.autoLaunchManager.enableAutoLaunch()
                             } else {
-                                trayLangManager.disableAutoLaunch()
+                                coordinator.autoLaunchManager.disableAutoLaunch()
                             }
                         }
                     ))
@@ -85,7 +79,7 @@ struct TrayMenuView: View {
                 
                 Button(action: { 
                     print("🔍 Settings button in tray pressed")
-                    showMainWindow() 
+                    coordinator.showMainWindow() 
                 }) {
                     HStack {
                         Image(systemName: "gear")
@@ -128,7 +122,7 @@ struct TrayMenuView: View {
     
     private func openHotKeyEditorWindow() {
         // Сначала показываем главное окно
-        showMainWindow()
+        coordinator.showMainWindow()
         
         // Отправляем уведомление для открытия редактора горячих клавиш
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -138,7 +132,7 @@ struct TrayMenuView: View {
     
     private func openSymbolsEditorWindow() {
         // Сначала показываем главное окно
-        showMainWindow()
+        coordinator.showMainWindow()
         
         // Отправляем уведомление для открытия редактора символов
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -148,7 +142,7 @@ struct TrayMenuView: View {
     
     private func showAboutWindow() {
         // Сначала показываем главное окно
-        showMainWindow()
+        coordinator.showMainWindow()
         
         // Отправляем уведомление для показа окна About
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
