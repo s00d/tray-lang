@@ -49,6 +49,15 @@ class AppCoordinator: ObservableObject {
         ) { [weak self] _ in
             self?.handleHotKeyPressed()
         }
+        
+        // Слушаем предоставление прав доступа
+        NotificationCenter.default.addObserver(
+            forName: .accessibilityGranted,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleAccessibilityGranted()
+        }
     }
     
     // MARK: - App Lifecycle
@@ -58,8 +67,10 @@ class AppCoordinator: ObservableObject {
         // Запрашиваем права доступа
         accessibilityManager.requestAccessibilityPermissions()
         
-        // Запускаем мониторинг горячих клавиш
-        hotKeyManager.startMonitoring()
+        // Запускаем мониторинг горячих клавиш только если права уже предоставлены
+        if accessibilityManager.isAccessibilityGranted() {
+            hotKeyManager.startMonitoring()
+        }
         
         // Загружаем пользовательские символы
         textTransformer.loadSymbols()
@@ -87,6 +98,11 @@ class AppCoordinator: ObservableObject {
         
         // Обрабатываем выделенный текст
         textProcessingManager.processSelectedText()
+    }
+    
+    private func handleAccessibilityGranted() {
+        print("🔄 Права доступа предоставлены, запускаем мониторинг...")
+        hotKeyManager.startMonitoring()
     }
     
     // MARK: - Public Interface
