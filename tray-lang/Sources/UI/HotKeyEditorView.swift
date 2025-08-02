@@ -9,7 +9,7 @@ import SwiftUI
 import AppKit
 
 struct HotKeyEditorView: View {
-    @ObservedObject var trayLangManager: TrayLangManager
+    @ObservedObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
     @State private var isCapturing = false
     @State private var capturedKey: String = ""
@@ -18,86 +18,117 @@ struct HotKeyEditorView: View {
     @State private var capturedModifiersArray: [CGEventFlags] = []
     
     var availableKeyCodes: [KeyInfo] {
-        return TrayLangManager.getAvailableKeyCodes()
+        return KeyUtils.getAvailableKeyCodes()
     }
     
     var availableModifiers: [(CGEventFlags, String)] {
-        return TrayLangManager.getAvailableModifiers()
+        return KeyUtils.getAvailableModifiers()
     }
     
     var body: some View {
-        VStack(spacing: 24) {
-            // Header
+        VStack(spacing: 0) {
             HStack {
                 Text("Hotkey Editor")
                     .font(.title2)
                     .fontWeight(.bold)
+                Spacer()
+                Button("✕") { dismiss() }
+                    .buttonStyle(.plain)
+            }
+            .padding()
+            Divider()
+            
+            VStack(spacing: 20) {
+                // Current/Selected combination display
+                Group {
+                    if let keyCode = capturedKeyCode, !capturedModifiersArray.isEmpty {
+                        // Show captured combination
+                        let hotKey = HotKey(keyCode: keyCode, modifiers: capturedModifiersArray)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Selected Combination")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Text(hotKey.displayString)
+                                .font(.system(.title2, design: .monospaced))
+                                .fontWeight(.medium)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.green.opacity(0.1))
+                                .cornerRadius(8)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Current Combination")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Text(coordinator.hotKey.displayString)
+                                .font(.system(.title2, design: .monospaced))
+                                .fontWeight(.medium)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                
+                // Capture section
+                VStack(spacing: 12) {
+                    Text("Capture New Hotkey")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Button(isCapturing ? "Stop Capture" : "Start Capture") {
+                        if isCapturing {
+                            stopCapturing()
+                        } else {
+                            startCapturing()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    
+                    if isCapturing {
+                        Text("Press any key combination...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal)
                 
                 Spacer()
-                
-                Button("✕") {
+            }
+            .padding(.vertical)
+            
+            Divider()
+            
+            HStack {
+                Button("Cancel") {
                     dismiss()
                 }
                 .buttonStyle(.plain)
-            }
-            .padding(.horizontal)
-
-            // Always show selected combination
-            Group {
-                if let keyCode = capturedKeyCode, !capturedModifiersArray.isEmpty {
-                    // Show captured combination
-                    let hotKey = HotKey(keyCode: keyCode, modifiers: capturedModifiersArray)
-                    Text("Selected: " + hotKey.description)
-                        .font(.title3)
-                        .fontWeight(.medium)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.1))
-                        .cornerRadius(8)
-                } else {
-                    Text("Current combination: " + trayLangManager.hotKey.description)
-                        .font(.title3)
-                        .fontWeight(.medium)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
+                
+                Spacer()
+                
+                Button("Confirm") {
+                    if let keyCode = capturedKeyCode, !capturedModifiersArray.isEmpty {
+                        coordinator.hotKey = HotKey(keyCode: keyCode, modifiers: capturedModifiersArray)
+                        coordinator.saveHotKey()
+                        
+                        // Перезапускаем захват клавиш после обновления хоткея
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            coordinator.startKeyCapture()
+                        }
+                    }
+                    dismiss()
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(capturedKeyCode == nil || capturedModifiersArray.isEmpty)
             }
-
-            // Capture button
-            Button(isCapturing ? "Stop capture" : "Start capture") {
-                if isCapturing {
-                    stopCapturing()
-                } else {
-                    startCapturing()
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-
-            Spacer()
-
-            // One confirmation button
-            Button("Confirm") {
-                if let keyCode = capturedKeyCode, !capturedModifiersArray.isEmpty {
-                    trayLangManager.hotKey = HotKey(keyCode: keyCode, modifiers: capturedModifiersArray)
-                    trayLangManager.saveHotKey()
-                }
-                dismiss()
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            .disabled(capturedKeyCode == nil || capturedModifiersArray.isEmpty)
-
-            Button("Cancel") {
-                dismiss()
-            }
-            .buttonStyle(.plain)
-            .padding(.bottom)
+            .padding()
         }
-        .padding()
-        .frame(width: 400, height: 300)
+        .frame(width: 350, height: 300)
         .onReceive(NotificationCenter.default.publisher(for: .keyCaptured)) { notification in
             print("📨 Получено уведомление о захвате клавиши")
             print("🔍 isCapturing: \(isCapturing)")
@@ -139,8 +170,13 @@ struct HotKeyEditorView: View {
     
     private func stopCapturing() {
         isCapturing = false
-        trayLangManager.stopKeyCapture()
+        coordinator.stopKeyCapture()
     }
+}
+
+// MARK: - Notifications
+extension Notification.Name {
+    static let keyCaptured = Notification.Name("keyCaptured")
 }
 
 // Вспомогательное представление для захвата клавиш
