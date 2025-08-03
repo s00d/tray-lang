@@ -156,4 +156,5 @@ extension Notification.Name {
     static let openHotKeyEditor = Notification.Name("openHotKeyEditor")
     static let openSymbolsEditor = Notification.Name("openSymbolsEditor")
     static let showAboutWindow = Notification.Name("showAboutWindow")
+    static let openExclusionsView = Notification.Name("openExclusionsView")
 } 
