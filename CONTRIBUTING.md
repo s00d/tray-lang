@@ -75,28 +75,6 @@ docs: update README with installation instructions
 4. Create a pull request with a clear description
 5. Wait for review and address any feedback
 
-## Areas for Contribution
-
-### High Priority
-
-- [ ] Additional language support
-- [ ] Performance optimizations
-- [ ] Accessibility improvements
-- [ ] Bug fixes
-
-### Medium Priority
-
-- [ ] UI/UX improvements
-- [ ] Additional features
-- [ ] Documentation updates
-- [ ] Test coverage improvements
-
-### Low Priority
-
-- [ ] Code refactoring
-- [ ] Style improvements
-- [ ] Additional examples
-
 ## Reporting Issues
 
 When reporting issues, please include:
