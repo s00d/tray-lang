@@ -1,242 +1,103 @@
 # Tray Lang
 
-A macOS application for automatic keyboard layout switching for selected text. Tray Lang helps you quickly transform text between different keyboard layouts while simultaneously switching the system keyboard layout.
+A macOS app that transforms text between keyboard layouts and prevents accidental app quits.
+
+![Tray Lang App](assets/app.png)
+
+## What it does
+
+**Text Transformation**: Select any text, press a hotkey, and it transforms between Russian/English layouts while switching your keyboard layout.
+
+**QBlocker**: Prevents accidental Cmd+Q quits. Hold Cmd+Q for 1-5 seconds to actually quit an app.
+
+## Quick Start
+
+1. **Download & Run**: Build from source or download the app
+2. **Grant Permissions**: Allow accessibility access when prompted
+3. **Configure Hotkey**: Set your preferred key combination
+4. **Use**: Select text → press hotkey → text transforms
 
 ## Features
 
-- **Automatic Layout Switching**: Transform selected text between different keyboard layouts
-- **Customizable Hotkeys**: Configure your own hotkey combinations
-- **Character Mapping**: Customize character mappings between layouts
-- **Tray Icon**: Easy access from the system tray
-- **Auto-launch**: Start automatically with your system
-- **Accessibility Integration**: Uses macOS accessibility features for text manipulation
-- **QBlocker Protection**: Prevent accidental Cmd+Q quits with customizable delay
-- **Application Exclusions**: Exclude specific applications from QBlocker protection
-- **Visual Feedback**: HUD notifications with progress indicators
+### Text Transformation
+- Transform text between Russian ↔ English layouts
+- Customizable character mappings
+- Automatic keyboard layout switching
+- Works in any application
 
-## How It Works
+### QBlocker Protection
+- Hold Cmd+Q for 1-5 seconds to quit apps
+- Single press shows notification, prevents quit
+- Exclude specific apps from protection
+- Track prevented accidental quits
 
-1. **Select Text**: Highlight any text in any application
-2. **Press Hotkey**: Use your configured hotkey combination
-3. **Automatic Transformation**: The text is transformed to the opposite layout
-4. **Layout Switch**: The system keyboard layout is also switched
+### Convenience
+- System tray access
+- Auto-launch with system
+- Customizable hotkeys
+- Visual feedback with HUD notifications
 
-## QBlocker - Accidental Quit Protection
+## Configuration
 
-Tray Lang includes QBlocker, a powerful feature that prevents accidental application closures when pressing Cmd+Q.
+### Hotkey Setup
+1. Open tray menu → "Hotkey Editor"
+2. Press "Start capture" and your desired keys
+3. Press "Confirm" to save
 
-### How QBlocker Works
+### QBlocker Settings
+- **Enable/Disable**: Toggle in main window
+- **Delay**: Set hold time (1-5 seconds)
+- **Exclusions**: Manage apps that bypass protection
 
-- **Hold to Quit**: Press and hold Cmd+Q for a specified duration (1-5 seconds) to actually quit an application
-- **Single Press Protection**: A single Cmd+Q press shows a notification and prevents the quit
-- **Visual Feedback**: HUD notification with progress bar shows remaining time
-- **Application Exclusions**: Configure specific apps to bypass QBlocker protection
-- **Customizable Delay**: Set the required hold duration (1-5 seconds)
+### Character Mappings
+- Edit via tray menu → "Symbols Editor"
+- Add custom character mappings
+- Use ready-made language templates
 
-### QBlocker Features
+## Requirements
 
-- **Smart Detection**: Works across all applications that support Cmd+Q
-- **Layout Independent**: Functions regardless of keyboard layout (Russian, English, etc.)
-- **Non-intrusive**: Minimal visual feedback with elegant HUD notifications
-- **Configurable**: Adjust delay time and manage excluded applications
-- **Statistics**: Track how many accidental quits have been prevented
-
-### Managing QBlocker
-
-#### Enable/Disable
-- Toggle QBlocker in the main application window
-- Settings are automatically saved
-
-#### Configure Delay
-- Set delay time from 1 to 5 seconds
-- Changes apply immediately
-
-#### Manage Exclusions
-- Access via "Manage Exclusions" button
-- Add applications to exclude from protection
-- Remove applications from exclusion list
-- Applications in exclusion list will quit normally with Cmd+Q
-
-#### View Statistics
-- See how many accidental quits have been prevented
-- Statistics are tracked per session
+- macOS 14.0+
+- Accessibility permissions (for text manipulation)
 
 ## Installation
 
-### Requirements
-- macOS 14.0 or later
-- Accessibility permissions (required for text manipulation)
-
-### Setup
-1. Download and run the application
-2. Grant accessibility permissions when prompted
-3. Configure your hotkey in the settings
-4. Customize character mappings if needed
-
-## Usage
-
-### Basic Usage
-1. Select text in any application
-2. Press your configured hotkey (default: Cmd+1)
-3. The text will be transformed and the keyboard layout will switch
-
-### Configuration
-
-#### Hotkey Editor
-- Access via tray menu → "Hotkey Editor"
-- Press "Start capture" and press your desired key combination
-- Press "Confirm" to save
-
-#### Symbols Editor
-- Access via tray menu → "Symbols Editor"
-- Add custom character mappings
-- Use ready-made blocks for common languages
-- Edit or delete existing mappings
-
-#### Auto-launch
-- Toggle "Auto Launch" in the tray menu
-- The app will start automatically with your system
-
-#### QBlocker Configuration
-- **Enable/Disable**: Toggle QBlocker protection in the main window
-- **Delay Setting**: Configure hold duration (1-5 seconds) using the stepper control
-- **Manage Exclusions**: Click "Manage Exclusions" to configure application exclusions
-- **Statistics**: View how many accidental quits have been prevented
-- **Visual Feedback**: HUD notifications show progress and remaining time
-
-### Supported Languages
-
-The app includes ready-made character mappings for:
-- Russian ↔ English
-- German ↔ English
-- French ↔ English
-- Spanish ↔ English
-- Italian ↔ English
-- Portuguese ↔ English
-- Swedish ↔ English
-- Norwegian ↔ English
-- Danish ↔ English
-- Finnish ↔ English
-- Polish ↔ English
-- Czech ↔ English
-- Hungarian ↔ English
-- Turkish ↔ English
-- Greek ↔ English
-- Cyrillic ↔ Latin (generic)
-
-## Permissions
-
-Tray Lang requires accessibility permissions to:
-- Read selected text from applications
-- Replace selected text with transformed content
-- Switch keyboard layouts
-
-To grant permissions:
-1. Go to System Preferences → Security & Privacy → Accessibility
-2. Add Tray Lang to the list of allowed applications
-3. Check the box next to Tray Lang
-
-## Development
-
-### Building from Source
-1. Clone the repository
-2. Open `tray-lang.xcodeproj` in Xcode
-3. Build and run the project
-
-### Architecture
-- **SwiftUI**: User interface
-- **AppKit**: macOS-specific functionality
-- **Carbon Framework**: Keyboard layout management
-- **Accessibility API**: Text manipulation
-
-### Key Components
-- `TrayLangManager`: Main application logic
-- `ContentView`: Main application window
-- `TrayMenuView`: Tray menu interface
-- `HotKeyEditorView`: Hotkey configuration
-- `SymbolsEditorView`: Character mapping editor
-- `AboutView`: Application information
-- `QBlockerManager`: Cmd+Q blocking functionality
-- `ExclusionManager`: Application exclusion management
-- `ExclusionsView`: Exclusion list interface
-- `NotificationManager`: HUD notifications and alerts
-
-
-### Building without certificate
-
-**Important**: The application is built without a developer certificate and requires manual signing after installation.
-
+### From Source
 ```bash
-# Build for ARM64 (Apple Silicon)
-xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-
-# Build for x86_64 (Intel)
-xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+git clone <repository>
+cd tray-lang
+make build
 ```
 
-### Signing the application
-
-After building, the application is unsigned and macOS may block its execution. To sign:
-
-1. **Get Developer ID** (if you have an Apple Developer account):
-   ```bash
-   codesign --force --deep --sign "Developer ID Application: Your Name" /path/to/tray-lang.app
-   ```
-
-2. **Or sign locally** (for personal use):
-   ```bash
-   chmod +x /Applications/tray-lang.app
-   xattr -cr /Applications/tray-lang.app
-   codesign --force --deep --sign - /Applications/tray-lang.app
-   ```
-
-3. **If macOS blocks execution**, run in Terminal:
-   ```bash
-   sudo xattr -rd com.apple.quarantine /path/to/tray-lang.app
-   ```
-
-## Installation
-
-1. Build the application according to the instructions above
-2. Sign the application (see "Signing the application" section)
-3. Drag `tray-lang.app` to the Applications folder
-4. On first launch, grant accessibility permissions in System Preferences → Security & Privacy → Privacy → Accessibility
-
+### Signing (if needed)
+```bash
+chmod +x /Applications/tray-lang.app
+xattr -cr /Applications/tray-lang.app
+codesign --force --deep --sign - /Applications/tray-lang.app
+```
 
 ## Troubleshooting
 
-### Common Issues
+**Hotkey not working?**
+- Check accessibility permissions
+- Try different key combination
 
-**Hotkey not working:**
-- Check if accessibility permissions are granted
-- Verify the hotkey is not conflicting with other applications
-- Try a different key combination
+**QBlocker not working?**
+- Ensure it's enabled in main window
+- Check accessibility permissions
+- Verify app isn't in exclusion list
 
-**Text not transforming:**
-- Ensure text is selected before pressing the hotkey
-- Check character mappings in the Symbols Editor
-- Verify the application has accessibility permissions
+**Text not transforming?**
+- Make sure text is selected
+- Check character mappings
+- Verify permissions
 
-**App not starting with system:**
-- Check the "Auto Launch" toggle in the tray menu
-- Verify the app is in the Applications folder
+## Architecture
 
-**QBlocker not working:**
-- Ensure QBlocker is enabled in the main window
-- Check if accessibility permissions are granted
-- Verify the application is not in the exclusion list
-- Try adjusting the delay setting
-
-**QBlocker blocking legitimate quits:**
-- Add the application to the exclusion list via "Manage Exclusions"
-- Or temporarily disable QBlocker for that specific application
-
-### Debug Information
-The app includes debug logging. Check the Console app for detailed information about:
-- Hotkey captures
-- Text transformations
-- Permission status
-- Layout switching
+Built with SwiftUI and AppKit:
+- `QBlockerManager`: Cmd+Q protection
+- `ExclusionManager`: App exclusion handling
+- `HotKeyManager`: Global hotkey management
+- `TextTransformer`: Layout conversion logic
 
 ## License
 
