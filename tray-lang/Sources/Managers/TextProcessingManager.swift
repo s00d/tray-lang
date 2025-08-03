@@ -27,86 +27,107 @@ class TextProcessingManager: ObservableObject {
     
     // MARK: - Text Retrieval
     private func getSelectedText() -> String? {
-        print("🔍 Получаем выделенный текст через Accessibility API...")
+        print("🔍 === НАЧАЛО ПОЛУЧЕНИЯ ВЫДЕЛЕННОГО ТЕКСТА ===")
         
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             print("❌ Не удалось получить активное приложение")
             return nil
         }
         
+        print("📱 Активное приложение: \(frontmostApp.localizedName ?? "Unknown") (PID: \(frontmostApp.processIdentifier))")
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
         
         // Метод 1: Попытка получить выделенный текст через kAXSelectedTextAttribute
+        print("🔍 Метод 1: kAXSelectedTextAttribute")
         do {
             if let text = try getSelectedTextViaAttribute(appElement) {
+                print("✅ Метод 1 УСПЕШЕН: \(text)")
                 return text
             }
         } catch {
-            print("⚠️ Ошибка при получении текста через Attribute: \(error)")
+            print("❌ Метод 1 ПРОВАЛЕН: \(error)")
         }
         
         // Метод 2: Попытка получить текст через kAXValueAttribute
+        print("🔍 Метод 2: kAXValueAttribute")
         do {
             if let text = try getSelectedTextViaValue(appElement) {
+                print("✅ Метод 2 УСПЕШЕН: \(text)")
                 return text
             }
         } catch {
-            print("⚠️ Ошибка при получении текста через Value: \(error)")
+            print("❌ Метод 2 ПРОВАЛЕН: \(error)")
         }
         
         // Метод 3: Попытка получить текст через AppleScript и горячие клавиши
+        print("🔍 Метод 3: AppleScript + Hotkeys")
         do {
             if let text = try getSelectedTextViaHotkeys() {
+                print("✅ Метод 3 УСПЕШЕН: \(text)")
                 return text
             }
         } catch {
-            print("⚠️ Ошибка при получении текста через Hotkeys: \(error)")
+            print("❌ Метод 3 ПРОВАЛЕН: \(error)")
         }
         
-        print("❌ Не удалось получить выделенный текст ни одним из методов")
+        print("❌ === ВСЕ МЕТОДЫ ПОЛУЧЕНИЯ ТЕКСТА ПРОВАЛЕНЫ ===")
         return nil
     }
     
     private func getSelectedTextViaAttribute(_ appElement: AXUIElement) throws -> String? {
+        print("  🔍 Попытка получить фокусный элемент...")
         var focusedElement: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
         
         guard result == .success, let focusedElement = focusedElement else {
+            print("  ❌ Не удалось получить фокусный элемент (результат: \(result))")
             throw TrayLangError.textRetrievalFailed
         }
         
+        print("  ✅ Фокусный элемент получен")
         var selectedText: CFTypeRef?
         let textResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedText)
         
+        print("  📋 Результат получения kAXSelectedTextAttribute: \(textResult)")
+        
         if textResult == .success, let text = selectedText as? String, !text.isEmpty {
-            print("📋 Получен текст через kAXSelectedTextAttribute: \(text)")
+            print("  ✅ Текст получен через kAXSelectedTextAttribute: '\(text)'")
             return text
+        } else {
+            print("  ❌ Текст не получен (результат: \(textResult), текст: \(selectedText != nil ? "present" : "nil"))")
         }
         
         return nil
     }
     
     private func getSelectedTextViaValue(_ appElement: AXUIElement) throws -> String? {
+        print("  🔍 Попытка получить фокусный элемент для Value...")
         var focusedElement: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
         
         guard result == .success, let focusedElement = focusedElement else {
+            print("  ❌ Не удалось получить фокусный элемент для Value")
             return nil
         }
         
+        print("  ✅ Фокусный элемент получен для Value")
         var value: CFTypeRef?
         let valueResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &value)
         
+        print("  📋 Результат получения kAXValueAttribute: \(valueResult)")
+        
         if valueResult == .success, let text = value as? String, !text.isEmpty {
-            print("📋 Получен текст через kAXValueAttribute: \(text)")
+            print("  ✅ Текст получен через kAXValueAttribute: '\(text)'")
             return text
+        } else {
+            print("  ❌ Текст не получен через Value (результат: \(valueResult), значение: \(value != nil ? "present" : "nil"))")
         }
         
         return nil
     }
     
     private func getSelectedTextViaHotkeys() throws -> String? {
-        print("📋 Пытаемся получить текст через AppleScript...")
+        print("  🔍 Выполняем AppleScript для получения текста...")
         
         // Используем AppleScript для получения выделенного текста с сохранением позиции
         let script = """
@@ -142,12 +163,14 @@ class TextProcessingManager: ObservableObject {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 if !output.isEmpty && output != "error" {
-                    print("📋 Получен текст через AppleScript: \(output)")
+                    print("  ✅ Текст получен через AppleScript: '\(output)'")
                     return output
+                } else {
+                    print("  ❌ AppleScript вернул пустой результат или ошибку: '\(output)'")
                 }
             }
         } catch {
-            print("❌ Ошибка при выполнении AppleScript: \(error)")
+            print("  ❌ Ошибка при выполнении AppleScript: \(error)")
             throw error
         }
         
@@ -156,23 +179,27 @@ class TextProcessingManager: ObservableObject {
     
     // MARK: - Text Replacement
     private func replaceSelectedText(with newText: String) {
-        print("📝 Заменяем выделенный текст на: \(newText)")
+        print("📝 === НАЧАЛО ЗАМЕНЫ ТЕКСТА: '\(newText)' ===")
         
-        // Метод 1: Попытка заменить через улучшенную логику (наиболее надежный)
-        if replaceTextWithImprovedLogic(newText) {
-            return
-        }
-        
-        // Метод 2: Попытка заменить через Accessibility API (резервный)
+        // Метод 1: Попытка заменить через Accessibility API (резервный)
+        print("🔍 Метод 1: Accessibility API")
         if replaceTextViaAccessibility(newText) {
+            print("✅ Метод 1 ЗАМЕНЫ УСПЕШЕН")
             return
         }
         
-        print("❌ Не удалось заменить текст ни одним из методов")
+        // Метод 2: Попытка заменить через улучшенную логику (наиболее надежный)
+        print("🔍 Метод 2: Улучшенная логика с AppleScript")
+        if replaceTextWithImprovedLogic(newText) {
+            print("✅ Метод 2 ЗАМЕНЫ УСПЕШЕН")
+            return
+        }
+        
+        print("❌ === ВСЕ МЕТОДЫ ЗАМЕНЫ ТЕКСТА ПРОВАЛЕНЫ ===")
     }
     
     private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
-        print("🔍 Пытаемся заменить текст с улучшенной логикой...")
+        print("  🔍 Выполняем AppleScript для замены текста...")
         
         // Используем AppleScript для замены текста с более продвинутой обработкой выделения
         let script = """
@@ -223,20 +250,24 @@ class TextProcessingManager: ObservableObject {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 if output == "success" {
-                    print("✅ Текст успешно заменен с улучшенной логикой")
+                    print("  ✅ AppleScript успешно выполнен")
                     return true
+                } else {
+                    print("  ❌ AppleScript вернул ошибку: '\(output)'")
                 }
             }
         } catch {
-            print("❌ Ошибка при выполнении AppleScript: \(error)")
+            print("  ❌ Ошибка при выполнении AppleScript: \(error)")
         }
         
         return false
     }
     
     private func replaceTextViaAccessibility(_ newText: String) -> Bool {
+        print("  🔍 Попытка замены через Accessibility API...")
+        
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            print("❌ Не удалось получить активное приложение")
+            print("  ❌ Не удалось получить активное приложение")
             return false
         }
         
@@ -247,35 +278,48 @@ class TextProcessingManager: ObservableObject {
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
         
         guard result == .success, let focusedElement = focusedElement else {
-            print("❌ Не удалось получить фокусный элемент")
+            print("  ❌ Не удалось получить фокусный элемент (результат: \(result))")
             return false
         }
+        
+        print("  ✅ Фокусный элемент получен")
         
         // Пытаемся получить текущий текст для проверки
         var currentText: CFTypeRef?
         let getResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &currentText)
         
+        print("  📋 Результат получения текущего текста: \(getResult)")
+        
         if getResult == .success, let text = currentText as? String {
-            print("📋 Текущий текст элемента: \(text)")
+            print("  📋 Текущий текст элемента: '\(text)'")
             
             // Пытаемся получить выделенный текст
             var selectedText: CFTypeRef?
             let selectedResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedText)
             
+            print("  📋 Результат получения выделенного текста: \(selectedResult)")
+            
             if selectedResult == .success, let selected = selectedText as? String, !selected.isEmpty {
-                print("📋 Выделенный текст: \(selected)")
+                print("  📋 Выделенный текст: '\(selected)'")
                 
                 // Заменяем выделенный текст на новый
                 let setResult = AXUIElementSetAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, newText as CFString)
                 
+                print("  📋 Результат установки нового текста: \(setResult)")
+                
                 if setResult == .success {
-                    print("✅ Выделенный текст успешно заменен через Accessibility API")
+                    print("  ✅ Выделенный текст успешно заменен через Accessibility API")
                     return true
+                } else {
+                    print("  ❌ Не удалось установить новый текст (результат: \(setResult))")
                 }
+            } else {
+                print("  ❌ Выделенный текст не найден или пуст")
             }
+        } else {
+            print("  ❌ Не удалось получить текущий текст (результат: \(getResult))")
         }
         
-        print("❌ Не удалось заменить текст через Accessibility API")
         return false
     }
 } 
