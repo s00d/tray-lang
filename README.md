@@ -6,11 +6,13 @@
 [![GitHub stars](https://img.shields.io/badge/github-stars-yellow?style=for-the-badge)](https://github.com/s00d/tray-lang/stargazers)
 [![Donate](https://img.shields.io/badge/Donate-Donationalerts-ff4081?style=for-the-badge)](https://www.donationalerts.com/r/s00d88)
 
+<div align="center">
+  <img src="assets/logo_small-min.png" alt="Tray Lang Logo" width="200">
+</div>
+
 # Tray Lang
 
 A macOS app that transforms text between keyboard layouts and prevents accidental app quits.
-
-<img src="assets/logo_small-min.png" alt="Tray Lang Logo" width="200">
 
 ![Tray Lang App](assets/app-min.png)
 
