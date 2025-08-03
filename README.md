@@ -10,6 +10,9 @@ A macOS application for automatic keyboard layout switching for selected text. T
 - **Tray Icon**: Easy access from the system tray
 - **Auto-launch**: Start automatically with your system
 - **Accessibility Integration**: Uses macOS accessibility features for text manipulation
+- **QBlocker Protection**: Prevent accidental Cmd+Q quits with customizable delay
+- **Application Exclusions**: Exclude specific applications from QBlocker protection
+- **Visual Feedback**: HUD notifications with progress indicators
 
 ## How It Works
 
@@ -17,6 +20,46 @@ A macOS application for automatic keyboard layout switching for selected text. T
 2. **Press Hotkey**: Use your configured hotkey combination
 3. **Automatic Transformation**: The text is transformed to the opposite layout
 4. **Layout Switch**: The system keyboard layout is also switched
+
+## QBlocker - Accidental Quit Protection
+
+Tray Lang includes QBlocker, a powerful feature that prevents accidental application closures when pressing Cmd+Q.
+
+### How QBlocker Works
+
+- **Hold to Quit**: Press and hold Cmd+Q for a specified duration (1-5 seconds) to actually quit an application
+- **Single Press Protection**: A single Cmd+Q press shows a notification and prevents the quit
+- **Visual Feedback**: HUD notification with progress bar shows remaining time
+- **Application Exclusions**: Configure specific apps to bypass QBlocker protection
+- **Customizable Delay**: Set the required hold duration (1-5 seconds)
+
+### QBlocker Features
+
+- **Smart Detection**: Works across all applications that support Cmd+Q
+- **Layout Independent**: Functions regardless of keyboard layout (Russian, English, etc.)
+- **Non-intrusive**: Minimal visual feedback with elegant HUD notifications
+- **Configurable**: Adjust delay time and manage excluded applications
+- **Statistics**: Track how many accidental quits have been prevented
+
+### Managing QBlocker
+
+#### Enable/Disable
+- Toggle QBlocker in the main application window
+- Settings are automatically saved
+
+#### Configure Delay
+- Set delay time from 1 to 5 seconds
+- Changes apply immediately
+
+#### Manage Exclusions
+- Access via "Manage Exclusions" button
+- Add applications to exclude from protection
+- Remove applications from exclusion list
+- Applications in exclusion list will quit normally with Cmd+Q
+
+#### View Statistics
+- See how many accidental quits have been prevented
+- Statistics are tracked per session
 
 ## Installation
 
@@ -53,6 +96,13 @@ A macOS application for automatic keyboard layout switching for selected text. T
 #### Auto-launch
 - Toggle "Auto Launch" in the tray menu
 - The app will start automatically with your system
+
+#### QBlocker Configuration
+- **Enable/Disable**: Toggle QBlocker protection in the main window
+- **Delay Setting**: Configure hold duration (1-5 seconds) using the stepper control
+- **Manage Exclusions**: Click "Manage Exclusions" to configure application exclusions
+- **Statistics**: View how many accidental quits have been prevented
+- **Visual Feedback**: HUD notifications show progress and remaining time
 
 ### Supported Languages
 
@@ -106,6 +156,10 @@ To grant permissions:
 - `HotKeyEditorView`: Hotkey configuration
 - `SymbolsEditorView`: Character mapping editor
 - `AboutView`: Application information
+- `QBlockerManager`: Cmd+Q blocking functionality
+- `ExclusionManager`: Application exclusion management
+- `ExclusionsView`: Exclusion list interface
+- `NotificationManager`: HUD notifications and alerts
 
 
 ### Building without certificate
@@ -166,6 +220,16 @@ After building, the application is unsigned and macOS may block its execution. T
 **App not starting with system:**
 - Check the "Auto Launch" toggle in the tray menu
 - Verify the app is in the Applications folder
+
+**QBlocker not working:**
+- Ensure QBlocker is enabled in the main window
+- Check if accessibility permissions are granted
+- Verify the application is not in the exclusion list
+- Try adjusting the delay setting
+
+**QBlocker blocking legitimate quits:**
+- Add the application to the exclusion list via "Manage Exclusions"
+- Or temporarily disable QBlocker for that specific application
 
 ### Debug Information
 The app includes debug logging. Check the Console app for detailed information about:
