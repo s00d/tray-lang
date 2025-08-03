@@ -1,8 +1,18 @@
+[![Platform](https://img.shields.io/badge/platform-macOS-blue?style=for-the-badge)](https://github.com/s00d/tray-lang)
+[![License](https://img.shields.io/badge/license-All%20Rights%20Reserved-red?style=for-the-badge)](https://github.com/s00d/tray-lang)
+[![GitHub release](https://img.shields.io/github/v/release/s00d/tray-lang?style=for-the-badge)](https://github.com/s00d/tray-lang/releases)
+[![GitHub downloads](https://img.shields.io/github/downloads/s00d/tray-lang/total?style=for-the-badge)](https://github.com/s00d/tray-lang/releases)
+[![GitHub issues](https://img.shields.io/badge/github-issues-orange?style=for-the-badge)](https://github.com/s00d/tray-lang/issues)
+[![GitHub stars](https://img.shields.io/badge/github-stars-yellow?style=for-the-badge)](https://github.com/s00d/tray-lang/stargazers)
+[![Donate](https://img.shields.io/badge/Donate-Donationalerts-ff4081?style=for-the-badge)](https://www.donationalerts.com/r/s00d88)
+
 # Tray Lang
 
 A macOS app that transforms text between keyboard layouts and prevents accidental app quits.
 
-![Tray Lang App](assets/app.png)
+<img src="assets/logo_small-min.png" alt="Tray Lang Logo" width="200">
+
+![Tray Lang App](assets/app-min.png)
 
 ## What it does
 
