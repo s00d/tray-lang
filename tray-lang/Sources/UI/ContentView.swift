@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var showingSymbolsEditor = false
     @State private var showingHotKeyEditor = false
     @State private var showingAboutWindow = false
+    @State private var showingExclusionsView = false
     @State private var testText = ""
     @State private var transformedText = ""
 
@@ -92,8 +93,14 @@ struct ContentView: View {
         .sheet(isPresented: $showingAboutWindow) {
             AboutView()
         }
+        .sheet(isPresented: $showingExclusionsView) {
+            ExclusionsView(exclusionManager: coordinator.exclusionManager)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openHotKeyEditor)) { _ in
             showingHotKeyEditor = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openExclusionsView)) { _ in
+            showingExclusionsView = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSymbolsEditor)) { _ in
             showingSymbolsEditor = true
@@ -103,71 +110,93 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - Main tab
+    // MARK: - Main Tab View
     private var mainTabView: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                // Hotkeys
+            VStack(spacing: 20) {
+                // Hotkey & Symbols Configuration
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Hotkeys")
+                        Image(systemName: "keyboard")
+                            .foregroundColor(.blue)
+                        Text("Hotkey & Symbols Configuration")
                             .font(.headline)
-                        
-                        Spacer()
-                        
-                        Button("Edit") {
-                            showingHotKeyEditor = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
                     }
                     
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Current Hotkey:")
-                                .font(.subheadline)
+                            Text("Hotkey:")
                                 .foregroundColor(.secondary)
                             Spacer()
+                            Button(coordinator.hotKeyManager.hotKey.displayString) {
+                                showingHotKeyEditor = true
+                            }
+                            .buttonStyle(.bordered)
                         }
                         
                         HStack {
-                            Text(hotKeyManager.hotKey.displayString)
-                                .font(.system(.body, design: .monospaced))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
-                            
+                            Text("Symbols:")
+                                .foregroundColor(.secondary)
                             Spacer()
+                            Button("Edit Symbols") {
+                                showingSymbolsEditor = true
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
                 }
                 .padding()
                 .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(12)
+                .cornerRadius(8)
                 
-                // Symbols
+                // QBlocker Configuration
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Symbols")
+                        Image(systemName: "lock.shield")
+                            .foregroundColor(.orange)
+                        Text("QBlocker Protection")
                             .font(.headline)
-                        
-                        Spacer()
-                        
-                        Button("Edit") {
-                            showingSymbolsEditor = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
                     }
                     
-                    Text("Customize keyboard layout mappings")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Block accidental Cmd+Q")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Toggle("", isOn: $coordinator.qBlockerManager.isEnabled)
+                        }
+                        
+                        if coordinator.qBlockerManager.isEnabled {
+                            HStack {
+                                Text("Delay (seconds):")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Stepper("\(coordinator.qBlockerManager.delay)", value: $coordinator.qBlockerManager.delay, in: 1...5)
+                                    .onChange(of: coordinator.qBlockerManager.delay) { _, _ in
+                                        coordinator.qBlockerManager.saveSettings()
+                                    }
+                            }
+                            
+                            HStack {
+                                Text("Accidental quits prevented:")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(coordinator.qBlockerManager.accidentalQuits)")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundColor(.green)
+                            }
+                            
+                            Button("Manage Exclusions") {
+                                showingExclusionsView = true
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Configure which applications should be excluded from QBlocker protection")
+                        }
+                    }
                 }
                 .padding()
                 .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(12)
+                .cornerRadius(8)
             }
             .padding()
         }
