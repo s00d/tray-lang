@@ -17,6 +17,12 @@ class AppCoordinator: ObservableObject {
     let notificationManager: NotificationManager
     let windowManager: WindowManager
     
+    // QBlocker Manager
+    var qBlockerManager: QBlockerManager
+    
+    // Exclusion Manager
+    let exclusionManager: ExclusionManager
+    
     init() {
         // Инициализируем core managers
         keyboardLayoutManager = KeyboardLayoutManager()
@@ -31,6 +37,12 @@ class AppCoordinator: ObservableObject {
         // Инициализируем UI components
         notificationManager = NotificationManager()
         windowManager = WindowManager()
+        
+        // Инициализируем exclusion manager
+        exclusionManager = ExclusionManager()
+        
+        // Инициализируем QBlocker manager
+        qBlockerManager = QBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
         
         // Устанавливаем связи
         windowManager.setCoordinator(self)
@@ -72,12 +84,72 @@ class AppCoordinator: ObservableObject {
             hotKeyManager.startMonitoring()
         }
         
+        // Запускаем QBlocker если права предоставлены и он был включен
+        if accessibilityManager.isAccessibilityGranted() {
+            startQBlocker()
+        }
+        
         // Загружаем пользовательские символы
         textTransformer.loadSymbols()
     }
     
+    private func startQBlocker() {
+        do {
+            try qBlockerManager.startIfEnabled()
+        } catch QBlockerError.AccessibilityPermissionDenied {
+            print("❌ QBlocker: Accessibility permissions denied - QBlocker cannot start")
+            notificationManager.showAlert(
+                title: "QBlocker Error",
+                message: "QBlocker requires accessibility permissions to monitor Cmd+Q. Please enable accessibility access in System Preferences > Security & Privacy > Privacy > Accessibility.",
+                style: .warning
+            )
+            openSystemPreferences()
+        } catch QBlockerError.EventTapCreationFailed {
+            print("❌ QBlocker: Failed to create event tap")
+            notificationManager.showAlert(
+                title: "QBlocker Error",
+                message: "Failed to create event monitoring for QBlocker. This may be due to system restrictions.",
+                style: .warning
+            )
+        } catch QBlockerError.RunLoopSourceCreationFailed {
+            print("❌ QBlocker: Failed to create run loop source")
+            notificationManager.showAlert(
+                title: "QBlocker Error",
+                message: "Failed to initialize QBlocker monitoring. Please try restarting the application.",
+                style: .warning
+            )
+        } catch {
+            print("❌ QBlocker: Unknown error: \(error)")
+            notificationManager.showAlert(
+                title: "QBlocker Error",
+                message: "An unexpected error occurred while starting QBlocker: \(error.localizedDescription)",
+                style: .warning
+            )
+        }
+    }
+    
+    private func openSystemPreferences() {
+        let script = """
+        tell application "System Preferences"
+            activate
+            set current pane to pane id "com.apple.preference.security"
+        end tell
+        """
+        
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", script]
+        
+        do {
+            try task.run()
+        } catch {
+            print("❌ Failed to open System Preferences: \(error)")
+        }
+    }
+    
     func stop() {
         hotKeyManager.stopMonitoring()
+        qBlockerManager.stop()
         print("⏹️ Приложение остановлено")
     }
     
@@ -103,6 +175,7 @@ class AppCoordinator: ObservableObject {
     private func handleAccessibilityGranted() {
         print("🔄 Права доступа предоставлены, запускаем мониторинг...")
         hotKeyManager.startMonitoring()
+        startQBlocker()
     }
     
     // MARK: - Public Interface
