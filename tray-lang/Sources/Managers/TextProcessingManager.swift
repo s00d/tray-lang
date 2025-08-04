@@ -201,37 +201,31 @@ class TextProcessingManager: ObservableObject {
     private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
         print("  🔍 Выполняем AppleScript для замены текста...")
         
-        // Используем AppleScript для замены текста с более продвинутой обработкой выделения
+        // Используем AppleScript для замены текста с оптимизированной логикой
         let script = """
         tell application "System Events"
             set originalClipboard to the clipboard
             try
-                -- Проверяем, есть ли выделенный текст
+                -- Копируем выделенный текст
                 key code 8 using {command down}
                 delay 0.1
                 set selectedText to the clipboard
                 
-                if selectedText is not equal to originalClipboard then
-                    -- Есть выделенный текст, заменяем его
-                    set the clipboard to "\(newText)"
-                    delay 0.1
-                    key code 9 using {command down}
-                    delay 0.1
-                    set the clipboard to originalClipboard
-                    return "success"
-                else
-                    -- Нет выделенного текста, просто вставляем
-                    set the clipboard to "\(newText)"
-                    delay 0.1
-                    key code 9 using {command down}
-                    delay 0.1
-                    set the clipboard to originalClipboard
-                    return "success"
-                end if
-            on error
+                -- Помещаем новый текст в буфер обмена
+                set the clipboard to "\(newText)"
+                delay 0.1
+                
+                -- Вставляем новый текст
+                key code 9 using {command down}
+                delay 0.1
+                
+                -- Восстанавливаем оригинальный буфер обмена
+                set the clipboard to originalClipboard
+                return "success"
+            on error errMsg
                 -- Восстанавливаем оригинальный буфер обмена в случае ошибки
                 set the clipboard to originalClipboard
-                return "error"
+                return "error: " & errMsg
             end try
         end tell
         """
@@ -249,7 +243,7 @@ class TextProcessingManager: ObservableObject {
             
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if output == "success" {
+                if output.hasPrefix("success") {
                     print("  ✅ AppleScript успешно выполнен")
                     return true
                 } else {
@@ -307,19 +301,38 @@ class TextProcessingManager: ObservableObject {
                 
                 print("  📋 Результат установки нового текста: \(setResult)")
                 
+                // Проверяем, что замена действительно произошла
                 if setResult == .success {
-                    print("  ✅ Выделенный текст успешно заменен через Accessibility API")
-                    return true
+                    // Проверяем результат замены
+                    var newCurrentText: CFTypeRef?
+                    let verifyResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &newCurrentText)
+                    
+                    if verifyResult == .success, let newText = newCurrentText as? String {
+                        print("  📋 Текст после замены: '\(newText)'")
+                        
+                        // Проверяем, что текст действительно изменился
+                        if newText != text {
+                            print("  ✅ Выделенный текст успешно заменен через Accessibility API")
+                            return true
+                        } else {
+                            print("  ❌ Текст не изменился после попытки замены")
+                            return false
+                        }
+                    } else {
+                        print("  ❌ Не удалось проверить результат замены (результат: \(verifyResult))")
+                        return false
+                    }
                 } else {
                     print("  ❌ Не удалось установить новый текст (результат: \(setResult))")
+                    return false
                 }
             } else {
                 print("  ❌ Выделенный текст не найден или пуст")
+                return false
             }
         } else {
             print("  ❌ Не удалось получить текущий текст (результат: \(getResult))")
+            return false
         }
-        
-        return false
     }
 } 
