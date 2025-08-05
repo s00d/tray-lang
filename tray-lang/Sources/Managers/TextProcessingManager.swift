@@ -5,9 +5,11 @@ import ApplicationServices
 // MARK: - Text Processing Manager
 class TextProcessingManager: ObservableObject {
     private let textTransformer: TextTransformer
+    private let keyboardLayoutManager: KeyboardLayoutManager
     
-    init(textTransformer: TextTransformer) {
+    init(textTransformer: TextTransformer, keyboardLayoutManager: KeyboardLayoutManager) {
         self.textTransformer = textTransformer
+        self.keyboardLayoutManager = keyboardLayoutManager
     }
     
     // MARK: - Text Processing
@@ -22,7 +24,12 @@ class TextProcessingManager: ObservableObject {
         let transformedText = textTransformer.transformText(selectedText)
         print("🔄 Трансформированный текст: \(transformedText)")
         
-        replaceSelectedText(with: transformedText)
+        if replaceSelectedText(with: transformedText) {
+            print("✅ Текст успешно заменен, переключаем язык")
+            switchToNextLayout()
+        } else {
+            print("❌ Не удалось заменить текст")
+        }
     }
     
     // MARK: - Text Retrieval
@@ -178,24 +185,30 @@ class TextProcessingManager: ObservableObject {
     }
     
     // MARK: - Text Replacement
-    private func replaceSelectedText(with newText: String) {
+    private func replaceSelectedText(with newText: String) -> Bool {
         print("📝 === НАЧАЛО ЗАМЕНЫ ТЕКСТА: '\(newText)' ===")
         
         // Метод 1: Попытка заменить через Accessibility API (резервный)
         print("🔍 Метод 1: Accessibility API")
         if replaceTextViaAccessibility(newText) {
             print("✅ Метод 1 ЗАМЕНЫ УСПЕШЕН")
-            return
+            return true
         }
         
         // Метод 2: Попытка заменить через улучшенную логику (наиболее надежный)
         print("🔍 Метод 2: Улучшенная логика с AppleScript")
         if replaceTextWithImprovedLogic(newText) {
             print("✅ Метод 2 ЗАМЕНЫ УСПЕШЕН")
-            return
+            return true
         }
         
         print("❌ === ВСЕ МЕТОДЫ ЗАМЕНЫ ТЕКСТА ПРОВАЛЕНЫ ===")
+        return false
+    }
+    
+    private func switchToNextLayout() {
+        print("🔄 Переключаем на следующую раскладку клавиатуры...")
+        keyboardLayoutManager.switchToNextLayout()
     }
     
     private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
