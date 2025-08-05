@@ -22,6 +22,7 @@ class KeyboardLayoutManager: ObservableObject {
     // MARK: - Layout Management
     func loadAvailableLayouts() {
         availableLayouts = getSystemLayouts()
+        print("[KeyboardLayoutManager] Available layouts: \(availableLayouts)")
     }
     
     func updateCurrentLayout() {
@@ -29,6 +30,32 @@ class KeyboardLayoutManager: ObservableObject {
         if newLayout != currentLayout {
             currentLayout = newLayout
             print("[KeyboardLayoutManager] Layout changed to: \(currentLayout)")
+        }
+    }
+    
+    func switchToNextLayout() {
+        guard !availableLayouts.isEmpty else {
+            print("[KeyboardLayoutManager] No available layouts")
+            return
+        }
+        
+        let currentIndex = availableLayouts.firstIndex(of: currentLayout) ?? 0
+        let nextIndex = (currentIndex + 1) % availableLayouts.count
+        let nextLayout = availableLayouts[nextIndex]
+        
+        print("[KeyboardLayoutManager] Switching from '\(currentLayout)' to '\(nextLayout)'")
+        
+        // Переключаем на следующую раскладку
+        if let inputSource = getInputSource(for: nextLayout) {
+            let result = TISSelectInputSource(inputSource)
+            if result == noErr {
+                print("[KeyboardLayoutManager] Successfully switched to '\(nextLayout)'")
+                currentLayout = nextLayout
+            } else {
+                print("[KeyboardLayoutManager] Failed to switch to '\(nextLayout)', error: \(result)")
+            }
+        } else {
+            print("[KeyboardLayoutManager] Could not find input source for '\(nextLayout)'")
         }
     }
     
@@ -47,7 +74,14 @@ class KeyboardLayoutManager: ObservableObject {
         for source in inputSources {
             if let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) {
                 let id = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
-                layouts.append(id)
+                // Фильтруем только основные языки ввода
+                if !id.contains("CharacterPaletteIM") && 
+                   !id.contains("Emoji") && 
+                   !id.contains("Pinyin") &&
+                   !id.contains("Handwriting") &&
+                   !id.contains("PressAndHold") {
+                    layouts.append(id)
+                }
             }
         }
         return layouts
@@ -62,5 +96,21 @@ class KeyboardLayoutManager: ObservableObject {
             return id
         }
         return "Unknown"
+    }
+    
+    private func getInputSource(for layoutID: String) -> TISInputSource? {
+        guard let inputSources = TISCreateInputSourceList(nil, false).takeRetainedValue() as? [TISInputSource] else {
+            return nil
+        }
+        
+        for source in inputSources {
+            if let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) {
+                let id = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+                if id == layoutID {
+                    return source
+                }
+            }
+        }
+        return nil
     }
 } 
