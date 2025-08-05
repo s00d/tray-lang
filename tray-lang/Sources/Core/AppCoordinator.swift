@@ -31,7 +31,7 @@ class AppCoordinator: ObservableObject {
         accessibilityManager = AccessibilityManager()
         
         // Инициализируем processing managers
-        textProcessingManager = TextProcessingManager(textTransformer: textTransformer)
+        textProcessingManager = TextProcessingManager(textTransformer: textTransformer, keyboardLayoutManager: keyboardLayoutManager)
         autoLaunchManager = AutoLaunchManager()
         
         // Инициализируем UI components
