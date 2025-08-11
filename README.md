@@ -20,7 +20,7 @@ A macOS app that transforms text between keyboard layouts and prevents accidenta
 
 **Text Transformation**: Select any text, press a hotkey, and it transforms between Russian/English layouts while switching your keyboard layout.
 
-**Hotkey Blocker**: Prevents accidental Cmd+Q quits and Cmd+W window closes. Hold Cmd+Q for 1-5 seconds to actually quit an app, or hold Cmd+W to close windows.
+**Hotkey Blocker**: Prevents accidental Cmd+Q quits and Cmd+W window closes. Hold Cmd+Q for 1-5 seconds to actually quit an app, or hold Cmd+W to close windows. Both protections can be enabled independently.
 
 ## Quick Start
 
@@ -42,7 +42,8 @@ A macOS app that transforms text between keyboard layouts and prevents accidenta
 - **Cmd+W Protection**: Hold Cmd+W for 1-5 seconds to close windows
 - Single press shows notification, prevents action
 - Exclude specific apps from protection
-- Track prevented accidental quits and closes
+- Track prevented accidental quits and closes separately
+- Independent enable/disable for each protection
 
 ### Convenience
 - System tray access with modern menu design
