@@ -17,8 +17,8 @@ class AppCoordinator: ObservableObject {
     let notificationManager: NotificationManager
     let windowManager: WindowManager
     
-    // QBlocker Manager
-    var qBlockerManager: QBlockerManager
+    // Hotkey Blocker Manager
+    var hotkeyBlockerManager: HotkeyBlockerManager
     
     // Exclusion Manager
     let exclusionManager: ExclusionManager
@@ -41,8 +41,8 @@ class AppCoordinator: ObservableObject {
         // Инициализируем exclusion manager
         exclusionManager = ExclusionManager()
         
-        // Инициализируем QBlocker manager
-        qBlockerManager = QBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
+        // Инициализируем HotkeyBlocker manager
+        hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
         
         // Устанавливаем связи
         windowManager.setCoordinator(self)
@@ -84,45 +84,50 @@ class AppCoordinator: ObservableObject {
             hotKeyManager.startMonitoring()
         }
         
-        // Запускаем QBlocker если права предоставлены и он был включен
+        // Запускаем HotkeyBlocker если права предоставлены и он был включен
         if accessibilityManager.isAccessibilityGranted() {
-            startQBlocker()
+            startHotkeyBlocker()
+        }
+        
+        // Синхронизируем состояние HotkeyBlocker
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.hotkeyBlockerManager.syncState()
         }
         
         // Загружаем пользовательские символы
         textTransformer.loadSymbols()
     }
     
-    private func startQBlocker() {
+    private func startHotkeyBlocker() {
         do {
-            try qBlockerManager.startIfEnabled()
+            try hotkeyBlockerManager.startIfEnabled()
         } catch QBlockerError.AccessibilityPermissionDenied {
-            print("❌ QBlocker: Accessibility permissions denied - QBlocker cannot start")
+            print("❌ HotkeyBlocker: Accessibility permissions denied - HotkeyBlocker cannot start")
             notificationManager.showAlert(
-                title: "QBlocker Error",
-                message: "QBlocker requires accessibility permissions to monitor Cmd+Q. Please enable accessibility access in System Preferences > Security & Privacy > Privacy > Accessibility.",
+                title: "HotkeyBlocker Error",
+                message: "HotkeyBlocker requires accessibility permissions to monitor Cmd+Q and Cmd+W. Please enable accessibility access in System Preferences > Security & Privacy > Privacy > Accessibility.",
                 style: .warning
             )
             openSystemPreferences()
         } catch QBlockerError.EventTapCreationFailed {
-            print("❌ QBlocker: Failed to create event tap")
+            print("❌ HotkeyBlocker: Failed to create event tap")
             notificationManager.showAlert(
-                title: "QBlocker Error",
-                message: "Failed to create event monitoring for QBlocker. This may be due to system restrictions.",
+                title: "HotkeyBlocker Error",
+                message: "Failed to create event monitoring for HotkeyBlocker. This may be due to system restrictions.",
                 style: .warning
             )
         } catch QBlockerError.RunLoopSourceCreationFailed {
-            print("❌ QBlocker: Failed to create run loop source")
+            print("❌ HotkeyBlocker: Failed to create run loop source")
             notificationManager.showAlert(
-                title: "QBlocker Error",
-                message: "Failed to initialize QBlocker monitoring. Please try restarting the application.",
+                title: "HotkeyBlocker Error",
+                message: "Failed to initialize HotkeyBlocker monitoring. Please try restarting the application.",
                 style: .warning
             )
         } catch {
-            print("❌ QBlocker: Unknown error: \(error)")
+            print("❌ HotkeyBlocker: Unknown error: \(error)")
             notificationManager.showAlert(
-                title: "QBlocker Error",
-                message: "An unexpected error occurred while starting QBlocker: \(error.localizedDescription)",
+                title: "HotkeyBlocker Error",
+                message: "An unexpected error occurred while starting HotkeyBlocker: \(error.localizedDescription)",
                 style: .warning
             )
         }
@@ -149,7 +154,7 @@ class AppCoordinator: ObservableObject {
     
     func stop() {
         hotKeyManager.stopMonitoring()
-        qBlockerManager.stop()
+        hotkeyBlockerManager.stop()
         print("⏹️ Приложение остановлено")
     }
     
@@ -175,7 +180,7 @@ class AppCoordinator: ObservableObject {
     private func handleAccessibilityGranted() {
         print("🔄 Права доступа предоставлены, запускаем мониторинг...")
         hotKeyManager.startMonitoring()
-        startQBlocker()
+        startHotkeyBlocker()
     }
     
     // MARK: - Public Interface
