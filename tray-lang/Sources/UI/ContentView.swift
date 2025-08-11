@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showingExclusionsView = false
     @State private var testText = ""
     @State private var transformedText = ""
+    @State private var uiRefreshTrigger = false
 
     @State private var selectedTab = 0
 
@@ -149,12 +150,12 @@ struct ContentView: View {
                 .background(Color(NSColor.controlBackgroundColor))
                 .cornerRadius(8)
                 
-                // QBlocker Configuration
+                // Hotkey Blocker Configuration
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: "lock.shield")
                             .foregroundColor(.orange)
-                        Text("QBlocker Protection")
+                        Text("Hotkey Blocker Protection")
                             .font(.headline)
                     }
                     
@@ -163,34 +164,79 @@ struct ContentView: View {
                             Text("Block accidental Cmd+Q")
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Toggle("", isOn: $coordinator.qBlockerManager.isEnabled)
+                            Toggle("", isOn: Binding(
+                                get: { coordinator.hotkeyBlockerManager.isCmdQEnabled },
+                                set: { newValue in
+                                    print("🔄 UI: Cmd+Q toggle changed to \(newValue)")
+                                    coordinator.hotkeyBlockerManager.isCmdQEnabled = newValue
+                                    uiRefreshTrigger.toggle()
+                                }
+                            ))
+                            .id("cmdq-toggle-\(uiRefreshTrigger)")
                         }
                         
-                        if coordinator.qBlockerManager.isEnabled {
+                        HStack {
+                            Text("Block accidental Cmd+W")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { coordinator.hotkeyBlockerManager.isCmdWEnabled },
+                                set: { newValue in
+                                    print("🔄 UI: Cmd+W toggle changed to \(newValue)")
+                                    coordinator.hotkeyBlockerManager.isCmdWEnabled = newValue
+                                    uiRefreshTrigger.toggle()
+                                }
+                            ))
+                            .id("cmdw-toggle-\(uiRefreshTrigger)")
+                        }
+                        
+                        if coordinator.hotkeyBlockerManager.isCmdQEnabled || coordinator.hotkeyBlockerManager.isCmdWEnabled {
                             HStack {
                                 Text("Delay (seconds):")
                                     .foregroundColor(.secondary)
                                 Spacer()
-                                Stepper("\(coordinator.qBlockerManager.delay)", value: $coordinator.qBlockerManager.delay, in: 1...5)
-                                    .onChange(of: coordinator.qBlockerManager.delay) { _, _ in
-                                        coordinator.qBlockerManager.saveSettings()
+                                Stepper("\(coordinator.hotkeyBlockerManager.delay)", value: $coordinator.hotkeyBlockerManager.delay, in: 1...5)
+                                    .onChange(of: coordinator.hotkeyBlockerManager.delay) { _, _ in
+                                        coordinator.hotkeyBlockerManager.saveSettings()
                                     }
                             }
                             
-                            HStack {
-                                Text("Accidental quits prevented:")
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text("\(coordinator.qBlockerManager.accidentalQuits)")
-                                    .font(.system(.body, design: .monospaced))
-                                    .foregroundColor(.green)
+                            if coordinator.hotkeyBlockerManager.isCmdQEnabled {
+                                HStack {
+                                    Text("Accidental quits prevented:")
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text("\(coordinator.hotkeyBlockerManager.accidentalQuits)")
+                                        .font(.system(.body, design: .monospaced))
+                                        .foregroundColor(.green)
+                                }
                             }
                             
-                            Button("Manage Exclusions") {
-                                showingExclusionsView = true
+                            if coordinator.hotkeyBlockerManager.isCmdWEnabled {
+                                HStack {
+                                    Text("Accidental closes prevented:")
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text("\(coordinator.hotkeyBlockerManager.accidentalCloses)")
+                                        .font(.system(.body, design: .monospaced))
+                                        .foregroundColor(.green)
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .help("Configure which applications should be excluded from QBlocker protection")
+                            
+                            HStack {
+                                Button("Manage Exclusions") {
+                                    showingExclusionsView = true
+                                }
+                                .buttonStyle(.bordered)
+                                .help("Configure which applications should be excluded from Hotkey Blocker protection")
+                                
+                                Button("Sync State") {
+                                    coordinator.hotkeyBlockerManager.syncState()
+                                    uiRefreshTrigger.toggle()
+                                }
+                                .buttonStyle(.bordered)
+                                .help("Synchronize UI state with actual monitoring status")
+                            }
                         }
                     }
                 }
