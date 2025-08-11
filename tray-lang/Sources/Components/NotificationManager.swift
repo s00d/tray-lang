@@ -89,8 +89,8 @@ class HUDAlertView: NSView {
         totalDuration = duration
         elapsedTime = 0
         
-        // Reset progress bar to full width
-        progressBar.frame = NSRect(x: 50, y: 5, width: 200, height: 4)
+        // Reset progress bar to full width (starts at 0 and fills to 200)
+        progressBar.frame = NSRect(x: 50, y: 5, width: 0, height: 4)
         
         // Start timer
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -102,13 +102,16 @@ class HUDAlertView: NSView {
         elapsedTime += 0.05
         
         let progress = elapsedTime / totalDuration
-        let remainingWidth = 200 * (1 - progress)
+        let currentWidth = 200 * progress
         
-        // Animate progress bar shrinking from right to left
+        // Ensure progress doesn't exceed bounds
+        let clampedWidth = min(max(currentWidth, 0), 200)
+        
+        // Animate progress bar filling from left to right
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.05
             context.timingFunction = CAMediaTimingFunction(name: .linear)
-            progressBar.animator().frame = NSRect(x: 50, y: 5, width: remainingWidth, height: 4)
+            progressBar.animator().frame = NSRect(x: 50, y: 5, width: clampedWidth, height: 4)
         })
         
         if progress >= 1.0 {
@@ -120,6 +123,9 @@ class HUDAlertView: NSView {
     func stopProgress() {
         progressTimer?.invalidate()
         progressTimer = nil
+        
+        // Reset progress bar to initial state
+        progressBar.frame = NSRect(x: 50, y: 5, width: 0, height: 4)
     }
     
     override func layout() {
@@ -173,6 +179,9 @@ class HUDAlertManager {
         // Update HUD content
         if let hudView = window.contentView as? HUDAlertView {
             hudView.updateText(text, icon: icon)
+            
+            // Stop any existing progress before starting new one
+            hudView.stopProgress()
             
             // Start progress bar if delay is specified
             if let delayTime = delayTime {
@@ -247,16 +256,16 @@ class NotificationManager: ObservableObject {
         HUDAlertManager.shared.dismissHUD()
     }
 
-    // MARK: - Legacy QBlocker HUD (for backward compatibility)
-    func showQBlockerHUD(delaySeconds: Int) {
+    // MARK: - Legacy Hotkey Blocker HUD (for backward compatibility)
+    func showHotkeyBlockerHUD(delaySeconds: Int, hotkey: String) {
         showHUD(
-            text: "Hold Cmd+Q for \(delaySeconds) seconds to quit",
+            text: "Hold \(hotkey) for \(delaySeconds) seconds to \(hotkey.contains("Q") ? "quit" : "close")",
             icon: "🔒",
             delayTime: TimeInterval(delaySeconds)
         )
     }
 
-    func dismissQBlockerHUD() {
+    func dismissHotkeyBlockerHUD() {
         dismissHUD()
     }
 
