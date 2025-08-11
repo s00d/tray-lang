@@ -2,26 +2,46 @@ import Foundation
 import AppKit
 import Carbon
 
-// MARK: - QBlocker Manager
-class QBlockerManager: ObservableObject {
+// MARK: - Hotkey Blocker Manager
+class HotkeyBlockerManager: ObservableObject {
     // MARK: - Properties
-    @Published var isEnabled: Bool = false {
+    @Published var isCmdQEnabled: Bool = false {
         didSet {
-            if oldValue != isEnabled { // Проверяем, что значение действительно изменилось
+            if oldValue != isCmdQEnabled && !isUpdatingState {
+                print("🔄 isCmdQEnabled changed from \(oldValue) to \(isCmdQEnabled)")
                 saveSettings()
-                if isEnabled {
-                    start()
-                } else {
-                    stop()
+                
+                // Проверяем общее состояние и обновляем мониторинг
+                DispatchQueue.main.async {
+                    self.updateMonitoringState()
                 }
             }
         }
     }
+    
+    @Published var isCmdWEnabled: Bool = false {
+        didSet {
+            if oldValue != isCmdWEnabled && !isUpdatingState {
+                print("🔄 isCmdWEnabled changed from \(oldValue) to \(isCmdWEnabled)")
+                saveSettings()
+                
+                // Проверяем общее состояние и обновляем мониторинг
+                DispatchQueue.main.async {
+                    self.updateMonitoringState()
+                }
+            }
+        }
+    }
+    
     @Published var accidentalQuits: Int = 0
+    @Published var accidentalCloses: Int = 0
     @Published var delay: Int = 1
     
-    private var tries: Int = 0
-    private var canQuit: Bool = true  // Добавляем canQuit как в оригинальном QBlocker
+    private var cmdQTries: Int = 0
+    private var cmdWTries: Int = 0
+    private var canQuit: Bool = true
+    private var canClose: Bool = true
+    private var isUpdatingState: Bool = false
     
     private var eventTap: CFMachPort?
     
@@ -45,44 +65,123 @@ class QBlockerManager: ObservableObject {
     
     // MARK: - Settings Management
     private func loadSettings() {
-        let savedEnabled = UserDefaults.standard.bool(forKey: "qblocker_enabled")
+        let savedCmdQEnabled = UserDefaults.standard.bool(forKey: "qblocker_enabled")
+        let savedCmdWEnabled = UserDefaults.standard.bool(forKey: "wblocker_enabled")
         let savedAccidentalQuits = UserDefaults.standard.integer(forKey: "qblocker_accidental_quits")
+        let savedAccidentalCloses = UserDefaults.standard.integer(forKey: "wblocker_accidental_closes")
         let savedDelay = UserDefaults.standard.integer(forKey: "qblocker_delay")
         
-        // Устанавливаем значения напрямую, минуя didSet
-        self.isEnabled = savedEnabled
+        // Устанавливаем значения через updateState, минуя didSet
+        updateState(cmdQ: savedCmdQEnabled, cmdW: savedCmdWEnabled)
         self.accidentalQuits = savedAccidentalQuits
+        self.accidentalCloses = savedAccidentalCloses
         self.delay = savedDelay == 0 ? 1 : savedDelay // Default delay
     }
     
     func saveSettings() {
-        UserDefaults.standard.set(isEnabled, forKey: "qblocker_enabled")
+        UserDefaults.standard.set(isCmdQEnabled, forKey: "qblocker_enabled")
+        UserDefaults.standard.set(isCmdWEnabled, forKey: "wblocker_enabled")
         UserDefaults.standard.set(accidentalQuits, forKey: "qblocker_accidental_quits")
+        UserDefaults.standard.set(accidentalCloses, forKey: "wblocker_accidental_closes")
         UserDefaults.standard.set(delay, forKey: "qblocker_delay")
     }
     
     // MARK: - Lifecycle
     func start() {
-        guard isEnabled else { return }
+        guard isCmdQEnabled || isCmdWEnabled else { return }
+        
+        // Проверяем, не запущен ли уже мониторинг
+        if isMonitoring {
+            print("ℹ️ HotkeyBlocker monitoring is already active")
+            return
+        }
         
         do {
             try startKeyMonitoring()
-            print("✅ QBlocker monitoring started")
+            print("✅ HotkeyBlocker monitoring started")
         } catch {
-            print("❌ Failed to start QBlocker: \(error)")
+            print("❌ Failed to start HotkeyBlocker: \(error)")
+            // Если не удалось запустить, сбрасываем состояние
+            DispatchQueue.main.async {
+                self.updateState(cmdQ: false, cmdW: false)
+            }
         }
     }
     
     func startIfEnabled() throws {
-        if isEnabled {
+        if isCmdQEnabled || isCmdWEnabled {
             try startKeyMonitoring()
-            print("✅ QBlocker monitoring started")
+            print("✅ HotkeyBlocker monitoring started")
         }
     }
     
     func stop() {
         stopKeyMonitoring()
-        print("⏹️ QBlocker monitoring stopped")
+        print("⏹️ HotkeyBlocker monitoring stopped")
+        
+        // Сбрасываем состояние после остановки
+        DispatchQueue.main.async {
+            self.updateState(cmdQ: false, cmdW: false)
+        }
+    }
+    
+    func forceStop() {
+        stopKeyMonitoring()
+        print("⏹️ HotkeyBlocker monitoring force stopped")
+        
+        // Принудительно сбрасываем состояние
+        DispatchQueue.main.async {
+            self.updateState(cmdQ: false, cmdW: false)
+            self.saveSettings()
+        }
+    }
+    
+    private func updateState(cmdQ: Bool, cmdW: Bool) {
+        isUpdatingState = true
+        isCmdQEnabled = cmdQ
+        isCmdWEnabled = cmdW
+        isUpdatingState = false
+    }
+    
+    private func updateMonitoringState() {
+        print("🔄 Updating monitoring state...")
+        print("  📋 Current state: Cmd+Q: \(isCmdQEnabled), Cmd+W: \(isCmdWEnabled)")
+        print("  📋 Monitoring active: \(isMonitoring)")
+        
+        // Если нужно включить мониторинг и он не активен
+        if (isCmdQEnabled || isCmdWEnabled) && !isMonitoring {
+            print("  🚀 Starting monitoring...")
+            start()
+        }
+        // Если нужно выключить мониторинг и он активен
+        else if !isCmdQEnabled && !isCmdWEnabled && isMonitoring {
+            print("  ⏹️ Stopping monitoring...")
+            stop()
+        }
+        // Если состояние изменилось, но мониторинг уже в нужном состоянии
+        else {
+            print("  ℹ️ Monitoring state is already correct")
+        }
+    }
+    
+    var isMonitoring: Bool {
+        return keyDownEventTap != nil && keyUpEventTap != nil
+    }
+    
+    func syncState() {
+        print("🔄 Syncing HotkeyBlocker state...")
+        print("  📋 isCmdQEnabled: \(isCmdQEnabled)")
+        print("  📋 isCmdWEnabled: \(isCmdWEnabled)")
+        print("  📋 isMonitoring: \(isMonitoring)")
+        
+        // Синхронизируем состояние с фактическим мониторингом
+        if !isMonitoring && (isCmdQEnabled || isCmdWEnabled) {
+            print("  ⚠️ State mismatch detected, resetting...")
+            DispatchQueue.main.async {
+                self.updateState(cmdQ: false, cmdW: false)
+                self.saveSettings()
+            }
+        }
     }
     
     // MARK: - Key Monitoring
@@ -109,25 +208,25 @@ class QBlockerManager: ObservableObject {
         
         // Check if event taps were created successfully
         guard keyDownEventTap != nil else {
-            print("❌ QBlocker: Failed to create keyDown event tap - accessibility permissions may be denied")
+            print("❌ HotkeyBlocker: Failed to create keyDown event tap - accessibility permissions may be denied")
             throw QBlockerError.AccessibilityPermissionDenied
         }
         
         guard keyUpEventTap != nil else {
-            print("❌ QBlocker: Failed to create keyUp event tap - accessibility permissions may be denied")
+            print("❌ HotkeyBlocker: Failed to create keyUp event tap - accessibility permissions may be denied")
             throw QBlockerError.AccessibilityPermissionDenied
         }
         
         // Create run loop sources
         keyDownRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyDownEventTap, 0)
         guard keyDownRunLoopSource != nil else {
-            print("❌ QBlocker: Failed to create keyDown run loop source")
+            print("❌ HotkeyBlocker: Failed to create keyDown run loop source")
             throw QBlockerError.RunLoopSourceCreationFailed
         }
         
         keyUpRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyUpEventTap, 0)
         guard keyUpRunLoopSource != nil else {
-            print("❌ QBlocker: Failed to create keyUp run loop source")
+            print("❌ HotkeyBlocker: Failed to create keyUp run loop source")
             throw QBlockerError.RunLoopSourceCreationFailed
         }
         
@@ -135,7 +234,7 @@ class QBlockerManager: ObservableObject {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), keyDownRunLoopSource, .commonModes)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), keyUpRunLoopSource, .commonModes)
         
-        print("✅ QBlocker: Event taps created and added to run loop successfully")
+        print("✅ HotkeyBlocker: Event taps created and added to run loop successfully")
     }
     
     private func stopKeyMonitoring() {
@@ -164,14 +263,16 @@ class QBlockerManager: ObservableObject {
     // MARK: - Event Handling
     func handleKeyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         let flags = event.flags
+        let keyCode = getKeyCode(from: event)
         
-        print("🔍 QBlocker: KeyDown event received")
+        print("🔍 HotkeyBlocker: KeyDown event received")
         print("  📋 Flags: \(flags)")
         print("  📋 Cmd: \(flags.contains(.maskCommand))")
         print("  📋 Shift: \(flags.contains(.maskShift))")
         print("  📋 Control: \(flags.contains(.maskControl))")
+        print("  📋 KeyCode: \(keyCode)")
         
-        // Check if Cmd+Q was pressed
+        // Check if Cmd key was pressed
         guard flags.contains(.maskCommand) else {
             print("  ❌ No Cmd key, passing through")
             return Unmanaged.passUnretained(event)
@@ -183,18 +284,26 @@ class QBlockerManager: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
         
-        // Check if Q was pressed (using keycode like original QBlocker)
-        let keyCode = getKeyCode(from: event)
-        guard keyCode == 12 else { // 12 is the keycode for Q
-            print("  ❌ Not Q key, passing through (keyCode: \(keyCode))")
-            return Unmanaged.passUnretained(event)
+        // Handle Cmd+Q
+        if keyCode == 12 && isCmdQEnabled { // 12 is the keycode for Q
+            return handleCmdQDown(event)
         }
         
+        // Handle Cmd+W
+        if keyCode == 13 && isCmdWEnabled { // 13 is the keycode for W
+            return handleCmdWDown(event)
+        }
+        
+        print("  ❌ Not Q or W key, passing through")
+        return Unmanaged.passUnretained(event)
+    }
+    
+    private func handleCmdQDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         print("  ✅ Cmd+Q detected!")
         
-        // Check if current app is excluded from QBlocker protection
+        // Check if current app is excluded from protection
         if exclusionManager.isCurrentAppExcluded() {
-            print("  ⚠️ Current app is excluded from QBlocker protection")
+            print("  ⚠️ Current app is excluded from protection")
             return Unmanaged.passUnretained(event)
         }
         
@@ -214,31 +323,34 @@ class QBlockerManager: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
         
-        // Check canQuit first (like original QBlocker)
+        // Check canQuit first
         guard canQuit else {
             print("  ❌ Not allowed to quit yet")
             return nil
         }
         
         // Show HUD if we're within delay
-        if tries <= delay {
+        if cmdQTries <= delay {
             print("  📱 Showing HUD")
-            showHUD(delayTime: TimeInterval(delay))
+            showHUD(delayTime: TimeInterval(delay), hotkey: "Cmd+Q")
+        } else {
+            // Hide HUD if we're past the delay
+            hideHUD()
         }
         
-        tries += 1
-        print("🔢 QBlocker: tries = \(tries), delay = \(delay)")
+        cmdQTries += 1
+        print("🔢 HotkeyBlocker: cmdQTries = \(cmdQTries), delay = \(delay)")
         
-        if tries > delay {
-            print("🔓 QBlocker: Quit allowed after holding for \(delay) seconds")
-            tries = 0
+        if cmdQTries > delay {
+            print("🔓 HotkeyBlocker: Quit allowed after holding for \(delay) seconds")
+            cmdQTries = 0
             canQuit = false  // Prevent rapid successive quits
             hideHUD()
             
             // Force quit the current application using AppleScript
             DispatchQueue.main.async {
                 if let currentApp = NSWorkspace.shared.menuBarOwningApplication {
-                    print("🚪 QBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
+                    print("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
                     
                     let script = """
                     tell application "\(currentApp.localizedName ?? "Unknown")" to quit
@@ -250,9 +362,9 @@ class QBlockerManager: ObservableObject {
                     
                     do {
                         try task.run()
-                        print("✅ QBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
+                        print("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
                     } catch {
-                        print("❌ QBlocker: Failed to terminate \(currentApp.localizedName ?? "Unknown"): \(error)")
+                        print("❌ HotkeyBlocker: Failed to terminate \(currentApp.localizedName ?? "Unknown"): \(error)")
                     }
                 }
             }
@@ -260,14 +372,65 @@ class QBlockerManager: ObservableObject {
             return nil  // Block the event since we're handling it ourselves
         }
         
-        print("🔒 QBlocker: Blocking quit attempt \(tries)/\(delay)")
+        print("🔒 HotkeyBlocker: Blocking quit attempt \(cmdQTries)/\(delay)")
+        return nil
+    }
+    
+    private func handleCmdWDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        print("  ✅ Cmd+W detected!")
+        
+        // Check if current app is excluded from protection
+        if exclusionManager.isCurrentAppExcluded() {
+            print("  ⚠️ Current app is excluded from protection")
+            return Unmanaged.passUnretained(event)
+        }
+        
+        // Check canClose first
+        guard canClose else {
+            print("  ❌ Not allowed to close yet")
+            return nil
+        }
+        
+        // Show HUD if we're within delay
+        if cmdWTries <= delay {
+            print("  📱 Showing HUD")
+            showHUD(delayTime: TimeInterval(delay), hotkey: "Cmd+W")
+        } else {
+            // Hide HUD if we're past the delay
+            hideHUD()
+        }
+        
+        cmdWTries += 1
+        print("🔢 HotkeyBlocker: cmdWTries = \(cmdWTries), delay = \(delay)")
+        
+        if cmdWTries > delay {
+            print("🔓 HotkeyBlocker: Close allowed after holding for \(delay) seconds")
+            cmdWTries = 0
+            canClose = false  // Prevent rapid successive closes
+            hideHUD()
+            
+            // Send Cmd+W event to close the window
+            DispatchQueue.main.async {
+                print("🚪 HotkeyBlocker: Sending Cmd+W to close window")
+                // Create and post a new Cmd+W event
+                if let newEvent = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true) {
+                    newEvent.flags = .maskCommand
+                    newEvent.post(tap: .cghidEventTap)
+                }
+            }
+            
+            return nil  // Block the original event since we're handling it ourselves
+        }
+        
+        print("🔒 HotkeyBlocker: Blocking close attempt \(cmdWTries)/\(delay)")
         return nil
     }
     
     func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        print("🔍 QBlocker: KeyUp event received")
+        print("🔍 HotkeyBlocker: KeyUp event received")
         
         let flags = event.flags
+        let keyCode = getKeyCode(from: event)
         
         guard flags.contains(.maskCommand) else {
             return Unmanaged.passUnretained(event)
@@ -277,26 +440,51 @@ class QBlockerManager: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
         
-        // Check if Q was pressed (using keycode like original QBlocker)
-        let keyCode = getKeyCode(from: event)
-        guard keyCode == 12 else { // 12 is the keycode for Q
-            print("  ❌ KeyUp: Not Q key, passing through (keyCode: \(keyCode))")
-            return Unmanaged.passUnretained(event)
+        // Handle Cmd+Q key up
+        if keyCode == 12 && isCmdQEnabled {
+            return handleCmdQUp(event)
         }
         
+        // Handle Cmd+W key up
+        if keyCode == 13 && isCmdWEnabled {
+            return handleCmdWUp(event)
+        }
+        
+        return Unmanaged.passUnretained(event)
+    }
+    
+    private func handleCmdQUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         print("  ✅ KeyUp: Q key detected")
         
         // Log accidental quit if we didn't hold long enough
-        if tries <= delay {
-            print("📊 QBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
+        if cmdQTries <= delay {
+            print("📊 HotkeyBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
             logAccidentalQuit()
         } else {
             hideHUD()
         }
         
-        print("🔄 QBlocker: Resetting tries from \(tries) to 0")
-        tries = 0
+        print("🔄 HotkeyBlocker: Resetting cmdQTries from \(cmdQTries) to 0")
+        cmdQTries = 0
         canQuit = true  // Allow next quit attempt
+        
+        return Unmanaged.passUnretained(event)
+    }
+    
+    private func handleCmdWUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        print("  ✅ KeyUp: W key detected")
+        
+        // Log accidental close if we didn't hold long enough
+        if cmdWTries <= delay {
+            print("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
+            logAccidentalClose()
+        } else {
+            hideHUD()
+        }
+        
+        print("🔄 HotkeyBlocker: Resetting cmdWTries from \(cmdWTries) to 0")
+        cmdWTries = 0
+        canClose = true  // Allow next close attempt
         
         return Unmanaged.passUnretained(event)
     }
@@ -376,11 +564,11 @@ class QBlockerManager: ObservableObject {
         return false
     }
     
-    private func showHUD(delayTime: TimeInterval) {
+    private func showHUD(delayTime: TimeInterval, hotkey: String) {
         // Show HUD using NotificationManager
         DispatchQueue.main.async {
             self.notificationManager.showHUD(
-                text: "Hold Cmd+Q for \(self.delay) seconds to quit",
+                text: "Hold \(hotkey) for \(self.delay) seconds to \(hotkey.contains("Q") ? "quit" : "close")",
                 icon: "🔒",
                 delayTime: delayTime
             )
@@ -396,14 +584,20 @@ class QBlockerManager: ObservableObject {
     private func logAccidentalQuit() {
         accidentalQuits += 1
         saveSettings()
-        print("📊 QBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
+        print("📊 HotkeyBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
+    }
+    
+    private func logAccidentalClose() {
+        accidentalCloses += 1
+        saveSettings()
+        print("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
     }
 }
 
 // MARK: - Callbacks
 private func keyDownCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, ptr: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let ptr = ptr else { return Unmanaged.passUnretained(event) }
-    let manager = Unmanaged<QBlockerManager>.fromOpaque(ptr).takeUnretainedValue()
+    let manager = Unmanaged<HotkeyBlockerManager>.fromOpaque(ptr).takeUnretainedValue()
     
     if let result = manager.handleKeyDown(event) {
         return result
@@ -414,7 +608,7 @@ private func keyDownCallback(proxy: CGEventTapProxy, type: CGEventType, event: C
 
 private func keyUpCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, ptr: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let ptr = ptr else { return Unmanaged.passUnretained(event) }
-    let manager = Unmanaged<QBlockerManager>.fromOpaque(ptr).takeUnretainedValue()
+    let manager = Unmanaged<HotkeyBlockerManager>.fromOpaque(ptr).takeUnretainedValue()
     
     if let result = manager.handleKeyUp(event) {
         return result
@@ -434,7 +628,7 @@ extension QBlockerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .AccessibilityPermissionDenied:
-            return "Accessibility permissions are required for QBlocker to work"
+            return "Accessibility permissions are required for HotkeyBlocker to work"
         case .EventTapCreationFailed:
             return "Failed to create event tap for key monitoring"
         case .RunLoopSourceCreationFailed:
