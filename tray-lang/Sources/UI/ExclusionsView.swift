@@ -17,7 +17,7 @@ struct ExclusionsView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("QBlocker Exclusions")
+                Text("Hotkey Blocker Exclusions")
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
@@ -29,7 +29,7 @@ struct ExclusionsView: View {
             
             // Content
             VStack(alignment: .leading, spacing: 16) {
-                Text("Applications in this list will not be protected by QBlocker. Cmd+Q will work normally for these apps.")
+                Text("Applications in this list will not be protected by Hotkey Blocker. Cmd+Q and Cmd+W will work normally for these apps.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -43,7 +43,7 @@ struct ExclusionsView: View {
                         Text("No excluded apps")
                             .font(.headline)
                             .foregroundColor(.secondary)
-                        Text("Add applications to exclude them from QBlocker protection")
+                        Text("Add applications to exclude them from Hotkey Blocker protection")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
