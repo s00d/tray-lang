@@ -86,9 +86,9 @@ make build
 
 ### Signing (if needed)
 ```bash
-chmod +x /Applications/tray-lang.app
-xattr -cr /Applications/tray-lang.app
-codesign --force --deep --sign - /Applications/tray-lang.app
+chmod +x /Applications/tray-lang-universal.app
+xattr -cr /Applications/tray-lang-universal.app
+codesign --force --deep --sign - /Applications/tray-lang-universal.app
 ```
 
 ## Troubleshooting
