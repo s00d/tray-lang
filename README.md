@@ -20,7 +20,7 @@ A macOS app that transforms text between keyboard layouts and prevents accidenta
 
 **Text Transformation**: Select any text, press a hotkey, and it transforms between Russian/English layouts while switching your keyboard layout.
 
-**QBlocker**: Prevents accidental Cmd+Q quits. Hold Cmd+Q for 1-5 seconds to actually quit an app.
+**Hotkey Blocker**: Prevents accidental Cmd+Q quits and Cmd+W window closes. Hold Cmd+Q for 1-5 seconds to actually quit an app, or hold Cmd+W to close windows.
 
 ## Quick Start
 
@@ -37,17 +37,19 @@ A macOS app that transforms text between keyboard layouts and prevents accidenta
 - Automatic keyboard layout switching
 - Works in any application
 
-### QBlocker Protection
-- Hold Cmd+Q for 1-5 seconds to quit apps
-- Single press shows notification, prevents quit
+### Hotkey Blocker Protection
+- **Cmd+Q Protection**: Hold Cmd+Q for 1-5 seconds to quit apps
+- **Cmd+W Protection**: Hold Cmd+W for 1-5 seconds to close windows
+- Single press shows notification, prevents action
 - Exclude specific apps from protection
-- Track prevented accidental quits
+- Track prevented accidental quits and closes
 
 ### Convenience
-- System tray access
+- System tray access with modern menu design
 - Auto-launch with system
 - Customizable hotkeys
 - Visual feedback with HUD notifications
+- Native macOS appearance (light/dark theme support)
 
 ## Configuration
 
@@ -56,8 +58,9 @@ A macOS app that transforms text between keyboard layouts and prevents accidenta
 2. Press "Start capture" and your desired keys
 3. Press "Confirm" to save
 
-### QBlocker Settings
-- **Enable/Disable**: Toggle in main window
+### Hotkey Blocker Settings
+- **Cmd+Q Protection**: Enable/disable quit protection
+- **Cmd+W Protection**: Enable/disable window close protection
 - **Delay**: Set hold time (1-5 seconds)
 - **Exclusions**: Manage apps that bypass protection
 
@@ -93,8 +96,8 @@ codesign --force --deep --sign - /Applications/tray-lang.app
 - Check accessibility permissions
 - Try different key combination
 
-**QBlocker not working?**
-- Ensure it's enabled in main window
+**Hotkey Blocker not working?**
+- Ensure Cmd+Q and/or Cmd+W protection is enabled in main window
 - Check accessibility permissions
 - Verify app isn't in exclusion list
 
@@ -106,7 +109,7 @@ codesign --force --deep --sign - /Applications/tray-lang.app
 ## Architecture
 
 Built with SwiftUI and AppKit:
-- `QBlockerManager`: Cmd+Q protection
+- `HotkeyBlockerManager`: Cmd+Q and Cmd+W protection
 - `ExclusionManager`: App exclusion handling
 - `HotKeyManager`: Global hotkey management
 - `TextTransformer`: Layout conversion logic
