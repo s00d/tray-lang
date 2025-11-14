@@ -6,24 +6,24 @@ import AppKit
 class HotKeyManager: ObservableObject {
     @Published var hotKey: HotKey = HotKey(keyCode: 18, modifiers: [.maskCommand])
     
-    // 1. ДОБАВЛЯЕМ didSet ДЛЯ СОХРАНЕНИЯ
-    @Published var isEnabled: Bool = false {
-        didSet {
-            UserDefaults.standard.set(isEnabled, forKey: "hotKeyMonitoringEnabled")
-        }
-    }
+    // 1. УБИРАЕМ didSet.
+    @Published var isEnabled: Bool = false
     
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     
     init() {
-        // 2. ЗАГРУЖАЕМ СОХРАНЕННОЕ СОСТОЯНИЕ
-        self.isEnabled = UserDefaults.standard.bool(forKey: "hotKeyMonitoringEnabled")
+        // 2. УБИРАЕМ загрузку isEnabled из init.
         loadHotKey()
     }
     
     deinit {
         stopMonitoring()
+    }
+    
+    // 3. ДОБАВЛЯЕМ функцию сохранения isEnabled, которую будет вызывать AppCoordinator
+    func saveEnabledState() {
+        UserDefaults.standard.set(isEnabled, forKey: "hotKeyMonitoringEnabled")
     }
     
     // MARK: - Hot Key Management
@@ -142,4 +142,4 @@ class HotKeyManager: ObservableObject {
 // MARK: - Notifications
 extension Notification.Name {
     static let hotKeyPressed = Notification.Name("hotKeyPressed")
-} 
+}

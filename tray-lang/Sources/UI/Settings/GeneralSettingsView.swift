@@ -83,15 +83,17 @@ struct GeneralSettingsView: View {
             
             Section(header: Text("Accidental Press Protection")) {
                 SettingsRow(icon: "q.circle", iconColor: .red, title: "Block Cmd+Q", subtitle: "Prevent accidental app quits") {
-                    Toggle("", isOn: $coordinator.hotkeyBlockerManager.isCmdQEnabled)
+                    // Привязка напрямую к AppCoordinator
+                    Toggle("", isOn: $coordinator.isCmdQBlockerEnabled)
                 }
                 
                 SettingsRow(icon: "w.circle", iconColor: .orange, title: "Block Cmd+W", subtitle: "Prevent accidental window closes") {
-                    Toggle("", isOn: $coordinator.hotkeyBlockerManager.isCmdWEnabled)
+                    // Привязка напрямую к AppCoordinator
+                    Toggle("", isOn: $coordinator.isCmdWBlockerEnabled)
                 }
             }
             
-            if coordinator.hotkeyBlockerManager.isCmdQEnabled || coordinator.hotkeyBlockerManager.isCmdWEnabled {
+            if coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled {
                 Section(header: Text("Protection Settings")) {
                     SettingsRow(icon: "timer", iconColor: .gray, title: "Hold Delay", subtitle: "Time to hold keys before triggering") {
                         Stepper("\(coordinator.hotkeyBlockerManager.delay) sec", value: $coordinator.hotkeyBlockerManager.delay, in: 1...5)

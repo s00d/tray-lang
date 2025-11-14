@@ -5,33 +5,9 @@ import Carbon
 // MARK: - Hotkey Blocker Manager
 class HotkeyBlockerManager: ObservableObject {
     // MARK: - Properties
-    @Published var isCmdQEnabled: Bool = false {
-        didSet {
-            if oldValue != isCmdQEnabled && !isUpdatingState {
-                print("🔄 isCmdQEnabled changed from \(oldValue) to \(isCmdQEnabled)")
-                saveSettings()
-                
-                // Проверяем общее состояние и обновляем мониторинг
-                DispatchQueue.main.async {
-                    self.updateMonitoringState()
-                }
-            }
-        }
-    }
-    
-    @Published var isCmdWEnabled: Bool = false {
-        didSet {
-            if oldValue != isCmdWEnabled && !isUpdatingState {
-                print("🔄 isCmdWEnabled changed from \(oldValue) to \(isCmdWEnabled)")
-                saveSettings()
-                
-                // Проверяем общее состояние и обновляем мониторинг
-                DispatchQueue.main.async {
-                    self.updateMonitoringState()
-                }
-            }
-        }
-    }
+    // 1. УБИРАЕМ didSet. Теперь это просто свойства.
+    @Published var isCmdQEnabled: Bool = false
+    @Published var isCmdWEnabled: Bool = false
     
     @Published var accidentalQuits: Int = 0
     @Published var accidentalCloses: Int = 0
@@ -41,7 +17,6 @@ class HotkeyBlockerManager: ObservableObject {
     private var cmdWTries: Int = 0
     private var canQuit: Bool = true
     private var canClose: Bool = true
-    private var isUpdatingState: Bool = false
     
     private var eventTap: CFMachPort?
     
@@ -56,7 +31,12 @@ class HotkeyBlockerManager: ObservableObject {
     init(notificationManager: NotificationManager, exclusionManager: ExclusionManager) {
         self.notificationManager = notificationManager
         self.exclusionManager = exclusionManager
-        loadSettings()
+        // 2. УБИРАЕМ loadSettings() из init. AppCoordinator сам задаст начальные значения.
+        // Загружаем только статистику и задержку
+        self.accidentalQuits = UserDefaults.standard.integer(forKey: "qblocker_accidental_quits")
+        self.accidentalCloses = UserDefaults.standard.integer(forKey: "wblocker_accidental_closes")
+        let savedDelay = UserDefaults.standard.integer(forKey: "qblocker_delay")
+        self.delay = savedDelay == 0 ? 1 : savedDelay
     }
     
     deinit {
@@ -64,20 +44,7 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     // MARK: - Settings Management
-    private func loadSettings() {
-        let savedCmdQEnabled = UserDefaults.standard.bool(forKey: "qblocker_enabled")
-        let savedCmdWEnabled = UserDefaults.standard.bool(forKey: "wblocker_enabled")
-        let savedAccidentalQuits = UserDefaults.standard.integer(forKey: "qblocker_accidental_quits")
-        let savedAccidentalCloses = UserDefaults.standard.integer(forKey: "wblocker_accidental_closes")
-        let savedDelay = UserDefaults.standard.integer(forKey: "qblocker_delay")
-        
-        // Устанавливаем значения через updateState, минуя didSet
-        updateState(cmdQ: savedCmdQEnabled, cmdW: savedCmdWEnabled)
-        self.accidentalQuits = savedAccidentalQuits
-        self.accidentalCloses = savedAccidentalCloses
-        self.delay = savedDelay == 0 ? 1 : savedDelay // Default delay
-    }
-    
+    // loadSettings() удален - AppCoordinator сам задает начальные значения
     func saveSettings() {
         UserDefaults.standard.set(isCmdQEnabled, forKey: "qblocker_enabled")
         UserDefaults.standard.set(isCmdWEnabled, forKey: "wblocker_enabled")
@@ -101,10 +68,11 @@ class HotkeyBlockerManager: ObservableObject {
             print("✅ HotkeyBlocker monitoring started")
         } catch {
             print("❌ Failed to start HotkeyBlocker: \(error)")
-            // Если не удалось запустить, сбрасываем состояние
-            DispatchQueue.main.async {
-                self.updateState(cmdQ: false, cmdW: false)
-            }
+        // Если не удалось запустить, сбрасываем состояние
+        DispatchQueue.main.async {
+            self.isCmdQEnabled = false
+            self.isCmdWEnabled = false
+        }
         }
     }
     
@@ -121,7 +89,8 @@ class HotkeyBlockerManager: ObservableObject {
         
         // Сбрасываем состояние после остановки
         DispatchQueue.main.async {
-            self.updateState(cmdQ: false, cmdW: false)
+            self.isCmdQEnabled = false
+            self.isCmdWEnabled = false
         }
     }
     
@@ -131,22 +100,20 @@ class HotkeyBlockerManager: ObservableObject {
         
         // Принудительно сбрасываем состояние
         DispatchQueue.main.async {
-            self.updateState(cmdQ: false, cmdW: false)
+            self.isCmdQEnabled = false
+            self.isCmdWEnabled = false
             self.saveSettings()
         }
     }
     
-    private func updateState(cmdQ: Bool, cmdW: Bool) {
-        isUpdatingState = true
-        isCmdQEnabled = cmdQ
-        isCmdWEnabled = cmdW
-        isUpdatingState = false
-    }
-    
-    private func updateMonitoringState() {
+    // 4. УПРОЩАЕМ updateMonitoringState. Теперь он просто слушается AppCoordinator.
+    func updateMonitoringState() {
         print("🔄 Updating monitoring state...")
         print("  📋 Current state: Cmd+Q: \(isCmdQEnabled), Cmd+W: \(isCmdWEnabled)")
         print("  📋 Monitoring active: \(isMonitoring)")
+        
+        // Сохраняем настройки при изменении
+        saveSettings()
         
         // Если нужно включить мониторинг и он не активен
         if (isCmdQEnabled || isCmdWEnabled) && !isMonitoring {
@@ -178,7 +145,8 @@ class HotkeyBlockerManager: ObservableObject {
         if !isMonitoring && (isCmdQEnabled || isCmdWEnabled) {
             print("  ⚠️ State mismatch detected, resetting...")
             DispatchQueue.main.async {
-                self.updateState(cmdQ: false, cmdW: false)
+                self.isCmdQEnabled = false
+                self.isCmdWEnabled = false
                 self.saveSettings()
             }
         }

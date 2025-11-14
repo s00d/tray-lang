@@ -4,76 +4,66 @@ import Combine
 
 // MARK: - App Coordinator
 class AppCoordinator: ObservableObject {
-    // Core Managers
+    // --- UI State Properties ---
+    // Эти свойства - ЕДИНСТВЕННЫЙ источник правды для всего UI
+    @Published var isAutoLaunchEnabled: Bool
+    @Published var isTextConversionEnabled: Bool
+    @Published var isCmdQBlockerEnabled: Bool
+    @Published var isCmdWBlockerEnabled: Bool
+    
+    // --- Core Managers ---
     let keyboardLayoutManager: KeyboardLayoutManager
     let hotKeyManager: HotKeyManager
     let textTransformer: TextTransformer
     let accessibilityManager: AccessibilityManager
-    
-    // Processing Managers
-    let textProcessingManager: TextProcessingManager
     let autoLaunchManager: AutoLaunchManager
-    
-    // UI Components
+    let textProcessingManager: TextProcessingManager
+    var smartLayoutManager: SmartLayoutManager
+    var hotkeyBlockerManager: HotkeyBlockerManager
+    let exclusionManager: ExclusionManager
     let notificationManager: NotificationManager
     let windowManager: WindowManager
-    
-    // Hotkey Blocker Manager
-    var hotkeyBlockerManager: HotkeyBlockerManager
-    
-    // Exclusion Manager
-    let exclusionManager: ExclusionManager
-    
-    // Smart Layout Manager
-    var smartLayoutManager: SmartLayoutManager
-    
-    // 1. ДОБАВЛЯЕМ НОВЫЕ @Published СВОЙСТВА ДЛЯ UI
-    @Published var isAutoLaunchEnabled: Bool
-    @Published var isTextConversionEnabled: Bool
     
     private var cancellables = Set<AnyCancellable>()
     
     init() {
-        // Инициализируем core managers
-        keyboardLayoutManager = KeyboardLayoutManager()
-        hotKeyManager = HotKeyManager()
-        textTransformer = TextTransformer()
-        accessibilityManager = AccessibilityManager()
+        // --- Инициализация менеджеров ---
+        self.keyboardLayoutManager = KeyboardLayoutManager()
+        self.hotKeyManager = HotKeyManager()
+        self.textTransformer = TextTransformer()
+        self.accessibilityManager = AccessibilityManager()
+        self.autoLaunchManager = AutoLaunchManager()
+        self.textProcessingManager = TextProcessingManager(textTransformer: textTransformer, keyboardLayoutManager: keyboardLayoutManager)
+        self.smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
+        self.notificationManager = NotificationManager()
+        self.exclusionManager = ExclusionManager()
+        self.hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
+        self.windowManager = WindowManager()
         
-        // Инициализируем processing managers
-        textProcessingManager = TextProcessingManager(textTransformer: textTransformer, keyboardLayoutManager: keyboardLayoutManager)
-        autoLaunchManager = AutoLaunchManager()
-        
-        // Инициализируем UI components
-        notificationManager = NotificationManager()
-        windowManager = WindowManager()
-        
-        // Инициализируем exclusion manager
-        exclusionManager = ExclusionManager()
-        
-        // Инициализируем HotkeyBlocker manager
-        hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
-        
-        // Инициализируем SmartLayoutManager
-        smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
-        
-        // 2. ИНИЦИАЛИЗИРУЕМ СВОЙСТВА ИЗ СОХРАНЕННЫХ ЗНАЧЕНИЙ
+        // --- Инициализация состояния UI из UserDefaults ---
         self.isAutoLaunchEnabled = autoLaunchManager.isAutoLaunchEnabled()
-        self.isTextConversionEnabled = hotKeyManager.isEnabled
-        
+        self.isTextConversionEnabled = UserDefaults.standard.bool(forKey: "hotKeyMonitoringEnabled")
+        self.isCmdQBlockerEnabled = UserDefaults.standard.bool(forKey: "qblocker_enabled")
+        self.isCmdWBlockerEnabled = UserDefaults.standard.bool(forKey: "wblocker_enabled")
+
         // Устанавливаем связи
         windowManager.setCoordinator(self)
         
-        // Настраиваем связи
+        // Настраиваем реактивные связи
+        setupBindings()
         setupConnections()
+    }
+    
+    private func setupBindings() {
+        // Синхронизируем состояние UI с поведением менеджеров
         
-        // 3. ДОБАВЛЯЕМ СИНХРОНИЗАЦИЮ СОСТОЯНИЯ
-        // Подписываемся на изменения наших новых свойств
+        // 1. Text Conversion
         $isTextConversionEnabled
-            .dropFirst() // Пропускаем первое значение при инициализации
+            .dropFirst() // Пропускаем начальное значение
             .sink { [weak self] enabled in
                 guard let self = self else { return }
-                self.hotKeyManager.isEnabled = enabled // Обновляем состояние в менеджере
+                self.hotKeyManager.isEnabled = enabled
+                self.hotKeyManager.saveEnabledState() // Сохраняем состояние
                 if enabled {
                     self.hotKeyManager.startMonitoring()
                 } else {
@@ -81,7 +71,8 @@ class AppCoordinator: ObservableObject {
                 }
             }
             .store(in: &cancellables)
-        
+            
+        // 2. Auto Launch
         $isAutoLaunchEnabled
             .dropFirst()
             .sink { [weak self] enabled in
@@ -90,6 +81,24 @@ class AppCoordinator: ObservableObject {
                 } else {
                     self?.autoLaunchManager.disableAutoLaunch()
                 }
+            }
+            .store(in: &cancellables)
+            
+        // 3. Cmd+Q Blocker
+        $isCmdQBlockerEnabled
+            .dropFirst()
+            .sink { [weak self] enabled in
+                self?.hotkeyBlockerManager.isCmdQEnabled = enabled
+                self?.hotkeyBlockerManager.updateMonitoringState()
+            }
+            .store(in: &cancellables)
+            
+        // 4. Cmd+W Blocker
+        $isCmdWBlockerEnabled
+            .dropFirst()
+            .sink { [weak self] enabled in
+                self?.hotkeyBlockerManager.isCmdWEnabled = enabled
+                self?.hotkeyBlockerManager.updateMonitoringState()
             }
             .store(in: &cancellables)
     }
@@ -119,7 +128,7 @@ class AppCoordinator: ObservableObject {
     func start() {
         print("🚀 Приложение запущено")
         
-        // Запрашиваем права доступа только если их еще нет
+        // Запрашиваем права, если их нет
         #if !DEBUG
         if !accessibilityManager.isAccessibilityGranted() {
             accessibilityManager.requestAccessibilityPermissions()
@@ -130,15 +139,14 @@ class AppCoordinator: ObservableObject {
         print("🔧 Режим разработки: права доступа установлены автоматически")
         #endif
         
-        // --- ИЗМЕНЕННАЯ ЛОГИКА ЗАПУСКА МОНИТОРИНГА ---
-        // Запускаем мониторинг, только если права есть И функция была включена пользователем
-        if accessibilityManager.isAccessibilityGranted() && hotKeyManager.isEnabled {
-            hotKeyManager.startMonitoring()
-        }
-        
-        // Запускаем HotkeyBlocker, если права есть и он был включен
+        // Сразу активируем функции, которые были включены
         if accessibilityManager.isAccessibilityGranted() {
-            startHotkeyBlocker()
+            if isTextConversionEnabled {
+                hotKeyManager.startMonitoring()
+            }
+            if isCmdQBlockerEnabled || isCmdWBlockerEnabled {
+                startHotkeyBlocker()
+            }
         }
         
         // Синхронизируем состояние HotkeyBlocker
@@ -231,8 +239,12 @@ class AppCoordinator: ObservableObject {
     
     private func handleAccessibilityGranted() {
         print("🔄 Права доступа предоставлены, запускаем мониторинг...")
-        hotKeyManager.startMonitoring()
-        startHotkeyBlocker()
+        if isTextConversionEnabled {
+            hotKeyManager.startMonitoring()
+        }
+        if isCmdQBlockerEnabled || isCmdWBlockerEnabled {
+            startHotkeyBlocker()
+        }
     }
     
     // MARK: - Public Interface
@@ -274,4 +286,4 @@ class AppCoordinator: ObservableObject {
     static func getAvailableModifiers() -> [(CGEventFlags, String)] {
         return KeyUtils.getAvailableModifiers()
     }
-} 
+}
