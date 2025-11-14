@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 // MARK: - App Coordinator
 class AppCoordinator: ObservableObject {
@@ -26,6 +27,12 @@ class AppCoordinator: ObservableObject {
     // Smart Layout Manager
     var smartLayoutManager: SmartLayoutManager
     
+    // 1. ДОБАВЛЯЕМ НОВЫЕ @Published СВОЙСТВА ДЛЯ UI
+    @Published var isAutoLaunchEnabled: Bool
+    @Published var isTextConversionEnabled: Bool
+    
+    private var cancellables = Set<AnyCancellable>()
+    
     init() {
         // Инициализируем core managers
         keyboardLayoutManager = KeyboardLayoutManager()
@@ -50,11 +57,41 @@ class AppCoordinator: ObservableObject {
         // Инициализируем SmartLayoutManager
         smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
         
+        // 2. ИНИЦИАЛИЗИРУЕМ СВОЙСТВА ИЗ СОХРАНЕННЫХ ЗНАЧЕНИЙ
+        self.isAutoLaunchEnabled = autoLaunchManager.isAutoLaunchEnabled()
+        self.isTextConversionEnabled = hotKeyManager.isEnabled
+        
         // Устанавливаем связи
         windowManager.setCoordinator(self)
         
         // Настраиваем связи
         setupConnections()
+        
+        // 3. ДОБАВЛЯЕМ СИНХРОНИЗАЦИЮ СОСТОЯНИЯ
+        // Подписываемся на изменения наших новых свойств
+        $isTextConversionEnabled
+            .dropFirst() // Пропускаем первое значение при инициализации
+            .sink { [weak self] enabled in
+                guard let self = self else { return }
+                self.hotKeyManager.isEnabled = enabled // Обновляем состояние в менеджере
+                if enabled {
+                    self.hotKeyManager.startMonitoring()
+                } else {
+                    self.hotKeyManager.stopMonitoring()
+                }
+            }
+            .store(in: &cancellables)
+        
+        $isAutoLaunchEnabled
+            .dropFirst()
+            .sink { [weak self] enabled in
+                if enabled {
+                    self?.autoLaunchManager.enableAutoLaunch()
+                } else {
+                    self?.autoLaunchManager.disableAutoLaunch()
+                }
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - Setup
@@ -82,21 +119,24 @@ class AppCoordinator: ObservableObject {
     func start() {
         print("🚀 Приложение запущено")
         
-        // Запрашиваем права доступа только если не в режиме разработки
+        // Запрашиваем права доступа только если их еще нет
         #if !DEBUG
-        accessibilityManager.requestAccessibilityPermissions()
+        if !accessibilityManager.isAccessibilityGranted() {
+            accessibilityManager.requestAccessibilityPermissions()
+        }
         #else
         // В режиме разработки просто устанавливаем статус как granted
         accessibilityManager.accessibilityStatus = .granted
         print("🔧 Режим разработки: права доступа установлены автоматически")
         #endif
         
-        // Запускаем мониторинг горячих клавиш только если права уже предоставлены
-        if accessibilityManager.isAccessibilityGranted() {
+        // --- ИЗМЕНЕННАЯ ЛОГИКА ЗАПУСКА МОНИТОРИНГА ---
+        // Запускаем мониторинг, только если права есть И функция была включена пользователем
+        if accessibilityManager.isAccessibilityGranted() && hotKeyManager.isEnabled {
             hotKeyManager.startMonitoring()
         }
         
-        // Запускаем HotkeyBlocker если права предоставлены и он был включен
+        // Запускаем HotkeyBlocker, если права есть и он был включен
         if accessibilityManager.isAccessibilityGranted() {
             startHotkeyBlocker()
         }

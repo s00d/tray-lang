@@ -10,7 +10,7 @@ struct GeneralSettingsView: View {
             Section(header: Text("Status")) {
                 HStack(spacing: 16) {
                     StatusIndicator(
-                        isActive: coordinator.hotKeyManager.isEnabled,
+                        isActive: coordinator.isTextConversionEnabled,
                         icon: "keyboard",
                         color: .green,
                         tooltip: "Hotkey Active"
@@ -50,16 +50,8 @@ struct GeneralSettingsView: View {
             
             Section(header: Text("Behavior")) {
                 SettingsRow(icon: "arrow.up.circle", iconColor: .purple, title: "Auto Launch", subtitle: "Launch Tray Lang on system login") {
-                    Toggle("", isOn: Binding(
-                        get: { coordinator.autoLaunchManager.isAutoLaunchEnabled() },
-                        set: { newValue in
-                            if newValue {
-                                coordinator.autoLaunchManager.enableAutoLaunch()
-                            } else {
-                                coordinator.autoLaunchManager.disableAutoLaunch()
-                            }
-                        }
-                    ))
+                    // 2. УПРОЩАЕМ TOGGLE ДЛЯ АВТОЗАПУСКА
+                    Toggle("", isOn: $coordinator.isAutoLaunchEnabled)
                 }
             }
             
@@ -78,16 +70,8 @@ struct GeneralSettingsView: View {
             
             Section(header: Text("Conversion")) {
                 SettingsRow(icon: "textformat.abc", iconColor: .orange, title: "Text Conversion", subtitle: "Enable text conversion feature") {
-                    Toggle("", isOn: Binding(
-                        get: { coordinator.hotKeyManager.isEnabled },
-                        set: { newValue in
-                            if newValue {
-                                coordinator.hotKeyManager.startMonitoring()
-                            } else {
-                                coordinator.hotKeyManager.stopMonitoring()
-                            }
-                        }
-                    ))
+                    // 3. УПРОЩАЕМ TOGGLE ДЛЯ КОНВЕРТАЦИИ
+                    Toggle("", isOn: $coordinator.isTextConversionEnabled)
                 }
                 
                 SettingsRow(icon: "pencil", iconColor: .orange, title: "Symbols & Languages", subtitle: "Edit symbol replacement rules") {

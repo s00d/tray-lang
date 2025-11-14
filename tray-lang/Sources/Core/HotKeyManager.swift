@@ -5,12 +5,20 @@ import AppKit
 // MARK: - Hot Key Manager
 class HotKeyManager: ObservableObject {
     @Published var hotKey: HotKey = HotKey(keyCode: 18, modifiers: [.maskCommand])
-    @Published var isEnabled: Bool = false
+    
+    // 1. ДОБАВЛЯЕМ didSet ДЛЯ СОХРАНЕНИЯ
+    @Published var isEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(isEnabled, forKey: "hotKeyMonitoringEnabled")
+        }
+    }
     
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     
     init() {
+        // 2. ЗАГРУЖАЕМ СОХРАНЕННОЕ СОСТОЯНИЕ
+        self.isEnabled = UserDefaults.standard.bool(forKey: "hotKeyMonitoringEnabled")
         loadHotKey()
     }
     
