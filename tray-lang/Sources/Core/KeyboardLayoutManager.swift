@@ -2,10 +2,17 @@ import Foundation
 import AppKit
 import Carbon
 
+// MARK: - Keyboard Layout Structure
+struct KeyboardLayout: Identifiable, Hashable {
+    var id: String // e.g., com.apple.keylayout.Russian
+    var localizedName: String // e.g., "Русская"
+    var shortName: String // e.g., "RU"
+}
+
 // MARK: - Keyboard Layout Manager
 class KeyboardLayoutManager: ObservableObject {
-    @Published var currentLayout: String = "Unknown"
-    @Published var availableLayouts: [String] = []
+    @Published var currentLayout: KeyboardLayout?
+    @Published var availableLayouts: [KeyboardLayout] = []
     
     private var layoutCheckTimer: Timer?
     
@@ -22,40 +29,45 @@ class KeyboardLayoutManager: ObservableObject {
     // MARK: - Layout Management
     func loadAvailableLayouts() {
         availableLayouts = getSystemLayouts()
-        print("[KeyboardLayoutManager] Available layouts: \(availableLayouts)")
+        print("[KeyboardLayoutManager] Available layouts loaded: \(availableLayouts.count)")
     }
     
     func updateCurrentLayout() {
         let newLayout = getCurrentSystemLayout()
         if newLayout != currentLayout {
             currentLayout = newLayout
-            print("[KeyboardLayoutManager] Layout changed to: \(currentLayout)")
+            if let layout = newLayout {
+                print("[KeyboardLayoutManager] Layout changed to: \(layout.localizedName) (\(layout.shortName))")
+            }
         }
     }
     
     func switchToNextLayout() {
-        guard !availableLayouts.isEmpty else {
-            print("[KeyboardLayoutManager] No available layouts")
+        guard !availableLayouts.isEmpty, let current = currentLayout else {
+            print("[KeyboardLayoutManager] No available layouts or current layout is unknown.")
             return
         }
         
-        let currentIndex = availableLayouts.firstIndex(of: currentLayout) ?? 0
+        let currentIndex = availableLayouts.firstIndex(of: current) ?? 0
         let nextIndex = (currentIndex + 1) % availableLayouts.count
         let nextLayout = availableLayouts[nextIndex]
         
-        print("[KeyboardLayoutManager] Switching from '\(currentLayout)' to '\(nextLayout)'")
+        print("[KeyboardLayoutManager] Switching from '\(current.localizedName)' to '\(nextLayout.localizedName)'")
         
-        // Переключаем на следующую раскладку
-        if let inputSource = getInputSource(for: nextLayout) {
+        if let inputSource = getInputSource(for: nextLayout.id) {
             let result = TISSelectInputSource(inputSource)
             if result == noErr {
-                print("[KeyboardLayoutManager] Successfully switched to '\(nextLayout)'")
                 currentLayout = nextLayout
+                print("[KeyboardLayoutManager] Successfully switched to '\(nextLayout.localizedName)'")
             } else {
-                print("[KeyboardLayoutManager] Failed to switch to '\(nextLayout)', error: \(result)")
+                print("[KeyboardLayoutManager] Failed to switch to '\(nextLayout.localizedName)', error: \(result)")
             }
-        } else {
-            print("[KeyboardLayoutManager] Could not find input source for '\(nextLayout)'")
+        }
+    }
+    
+    func switchToLayout(id layoutID: String) {
+        if let inputSource = getInputSource(for: layoutID) {
+            TISSelectInputSource(inputSource)
         }
     }
     
@@ -66,36 +78,59 @@ class KeyboardLayoutManager: ObservableObject {
     }
     
     // MARK: - System Integration
-    private func getSystemLayouts() -> [String] {
-        guard let inputSources = TISCreateInputSourceList(nil, false).takeRetainedValue() as? [TISInputSource] else {
-            return []
+    
+    // Новый универсальный метод для извлечения информации
+    private func extractLayoutInfo(from source: TISInputSource) -> KeyboardLayout? {
+        guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
+              let namePtr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else {
+            return nil
         }
-        var layouts: [String] = []
-        for source in inputSources {
-            if let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) {
-                let id = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
-                // Фильтруем только основные языки ввода
-                if !id.contains("CharacterPaletteIM") && 
-                   !id.contains("Emoji") && 
-                   !id.contains("Pinyin") &&
-                   !id.contains("Handwriting") &&
-                   !id.contains("PressAndHold") {
-                    layouts.append(id)
+        
+        let layoutID = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+        let localizedName = Unmanaged<CFString>.fromOpaque(namePtr).takeUnretainedValue() as String
+        var shortName = "??".uppercased()
+
+        // Самый надежный способ: получаем языковой код (ISO 639)
+        if let langPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages),
+           let languages = Unmanaged<CFArray>.fromOpaque(langPtr).takeUnretainedValue() as? [String],
+           let firstLang = languages.first {
+            shortName = firstLang.uppercased()
+        } else {
+            // Фолбэк: если языковой код не указан, пытаемся угадать по ID
+            if layoutID.lowercased().contains("abc") || layoutID.lowercased().contains("us") {
+                shortName = "EN"
+            } else {
+                let components = layoutID.split(separator: ".")
+                if let lastComponent = components.last {
+                    shortName = String(lastComponent.prefix(2)).uppercased()
                 }
             }
         }
-        return layouts
+        
+        return KeyboardLayout(id: layoutID, localizedName: localizedName, shortName: shortName)
+    }
+
+    private func getSystemLayouts() -> [KeyboardLayout] {
+        guard let inputSources = TISCreateInputSourceList(nil, false).takeRetainedValue() as? [TISInputSource] else {
+            return []
+        }
+        
+        // Используем compactMap для фильтрации и трансформации
+        return inputSources.compactMap { source in
+            guard let categoryPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory),
+                  let category = Unmanaged<CFString>.fromOpaque(categoryPtr).takeUnretainedValue() as? String,
+                  category == (kTISCategoryKeyboardInputSource as String) else {
+                return nil
+            }
+            return extractLayoutInfo(from: source)
+        }
     }
     
-    private func getCurrentSystemLayout() -> String {
+    private func getCurrentSystemLayout() -> KeyboardLayout? {
         guard let currentSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
-            return "Unknown"
+            return nil
         }
-        if let idPtr = TISGetInputSourceProperty(currentSource, kTISPropertyInputSourceID) {
-            let id = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
-            return id
-        }
-        return "Unknown"
+        return extractLayoutInfo(from: currentSource)
     }
     
     private func getInputSource(for layoutID: String) -> TISInputSource? {

@@ -47,11 +47,12 @@ class AccessibilityManager: ObservableObject {
     
     init() {
         updateAccessibilityStatus()
-        startStatusMonitoring()
+        setupStatusMonitoring()
     }
     
     deinit {
         statusCheckTimer?.invalidate()
+        DistributedNotificationCenter.default.removeObserver(self)
     }
     
     // MARK: - Status Management
@@ -60,10 +61,24 @@ class AccessibilityManager: ObservableObject {
         accessibilityStatus = accessibilityEnabled ? .granted : .denied
     }
     
-    private func startStatusMonitoring() {
-        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+    private func setupStatusMonitoring() {
+        // Подписываемся на системное уведомление об изменении настроек доступности
+        DistributedNotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAccessibilitySettingsChanged),
+            name: NSNotification.Name("com.apple.accessibility.api"),
+            object: nil
+        )
+        
+        // Также оставляем таймер как резервный механизм (на случай, если уведомление не сработает)
+        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.checkAccessibilityStatus()
         }
+    }
+    
+    @objc private func handleAccessibilitySettingsChanged() {
+        print("🔔 Получено уведомление об изменении настроек доступности")
+        checkAccessibilityStatus()
     }
     
     private func checkAccessibilityStatus() {
@@ -117,15 +132,18 @@ class AccessibilityManager: ObservableObject {
         
         permissionAlert = alert
         
-        let response = alert.runModal()
-        permissionAlert = nil
-        isRequestingPermissions = false
-        
-        if response == .alertFirstButtonReturn {
-            openSystemPreferences()
-        } else {
-            // Если пользователь отменил, обновляем статус
-            updateAccessibilityStatus()
+        // Используем асинхронный показ алерта чтобы не блокировать UI
+        DispatchQueue.main.async {
+            let response = alert.runModal()
+            self.permissionAlert = nil
+            self.isRequestingPermissions = false
+            
+            if response == .alertFirstButtonReturn {
+                self.openSystemPreferences()
+            } else {
+                // Если пользователь отменил, обновляем статус
+                self.updateAccessibilityStatus()
+            }
         }
     }
     

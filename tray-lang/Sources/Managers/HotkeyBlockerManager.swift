@@ -347,24 +347,29 @@ class HotkeyBlockerManager: ObservableObject {
             canQuit = false  // Prevent rapid successive quits
             hideHUD()
             
-            // Force quit the current application using AppleScript
+            // Force quit the current application using NSRunningApplication
             DispatchQueue.main.async {
                 if let currentApp = NSWorkspace.shared.menuBarOwningApplication {
                     print("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
                     
-                    let script = """
-                    tell application "\(currentApp.localizedName ?? "Unknown")" to quit
-                    """
-                    
-                    let task = Process()
-                    task.launchPath = "/usr/bin/osascript"
-                    task.arguments = ["-e", script]
-                    
-                    do {
-                        try task.run()
-                        print("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
-                    } catch {
-                        print("❌ HotkeyBlocker: Failed to terminate \(currentApp.localizedName ?? "Unknown"): \(error)")
+                    // Используем нативный API для завершения приложения
+                    if let runningApp = NSRunningApplication(processIdentifier: currentApp.processIdentifier) {
+                        if runningApp.terminate() {
+                            print("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
+                        } else {
+                            print("❌ HotkeyBlocker: Failed to terminate, trying force terminate")
+                            // Если terminate не сработал, пробуем force terminate
+                            if runningApp.forceTerminate() {
+                                print("✅ HotkeyBlocker: Successfully force terminated \(currentApp.localizedName ?? "Unknown")")
+                            } else {
+                                print("❌ HotkeyBlocker: Failed to force terminate, falling back to AppleScript")
+                                // Запасной вариант - AppleScript
+                                self.terminateAppViaAppleScript(currentApp)
+                            }
+                        }
+                    } else {
+                        print("❌ HotkeyBlocker: Could not create NSRunningApplication, falling back to AppleScript")
+                        self.terminateAppViaAppleScript(currentApp)
                     }
                 }
             }
@@ -591,6 +596,26 @@ class HotkeyBlockerManager: ObservableObject {
         accidentalCloses += 1
         saveSettings()
         print("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
+    }
+    
+    private func terminateAppViaAppleScript(_ app: NSRunningApplication) {
+        let appName = app.localizedName ?? "Unknown"
+        print("🔄 HotkeyBlocker: Using AppleScript fallback to terminate \(appName)")
+        
+        let script = """
+        tell application "\(appName)" to quit
+        """
+        
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", script]
+        
+        do {
+            try task.run()
+            print("✅ HotkeyBlocker: Successfully terminated \(appName) via AppleScript")
+        } catch {
+            print("❌ HotkeyBlocker: Failed to terminate \(appName) via AppleScript: \(error)")
+        }
     }
 }
 

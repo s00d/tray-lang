@@ -8,94 +8,82 @@
 import SwiftUI
 import AppKit
 
+// Define panels for navigation
+enum Panel: Hashable {
+    case general
+    case diagnostics
+    case about
+}
+
 struct ContentView: View {
     @StateObject private var coordinator: AppCoordinator
-    @ObservedObject private var hotKeyManager: HotKeyManager
     
-    @State private var showingSymbolsEditor = false
+    @State private var selectedPanel: Panel? = .general // Default panel
     @State private var showingHotKeyEditor = false
-    @State private var showingAboutWindow = false
+    @State private var showingSymbolsEditor = false
     @State private var showingExclusionsView = false
-    @State private var testText = ""
-    @State private var transformedText = ""
-    @State private var uiRefreshTrigger = false
-
-    @State private var selectedTab = 0
+    @State private var showingDefaultLayoutsEditor = false
 
     init(coordinator: AppCoordinator) {
         self._coordinator = StateObject(wrappedValue: coordinator)
-        self.hotKeyManager = coordinator.hotKeyManager
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Image(systemName: "keyboard")
-                    .font(.title2)
-                    .foregroundColor(.accentColor)
-                
-                Text("Tray Lang")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                // Status indicators
-                HStack(spacing: 8) {
-                    // Hotkey status
-                    Circle()
-                        .fill(coordinator.hotKeyManager.isEnabled ? .green : .red)
-                        .frame(width: 12, height: 12)
-                        .help(coordinator.hotKeyManager.isEnabled ? "Hotkey monitoring active" : "Hotkey monitoring inactive")
-                        .animation(.easeInOut(duration: 0.2), value: coordinator.hotKeyManager.isEnabled)
-                    
-                    // Accessibility status
-                    Circle()
-                        .fill(coordinator.accessibilityManager.accessibilityStatus.color)
-                        .frame(width: 12, height: 12)
-                        .help(coordinator.accessibilityManager.accessibilityStatus.description)
-                        .animation(.easeInOut(duration: 0.2), value: coordinator.accessibilityManager.accessibilityStatus)
+        NavigationSplitView {
+            // --- SIDEBAR ---
+            List(selection: $selectedPanel) {
+                Section(header: Text("Settings")) {
+                    Label("General", systemImage: "gear")
+                        .tag(Panel.general)
                 }
-                .id("status-indicators")
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background(Color(NSColor.controlBackgroundColor))
-            
-            Divider()
-            
-            // Main content
-            TabView(selection: $selectedTab) {
-                // Main tab
-                mainTabView
-                    .tabItem {
-                        Image(systemName: "house")
-                        Text("Main")
-                    }
-                    .tag(0)
                 
-                // Testing tab
-                testingTabView
-                    .tabItem {
-                        Image(systemName: "text.magnifyingglass")
-                        Text("Test")
-                    }
-                    .tag(1)
+                Section(header: Text("Tools")) {
+                    Label("Diagnostics", systemImage: "ladybug")
+                        .tag(Panel.diagnostics)
+                }
+                
+                Section {
+                    Label("About", systemImage: "info.circle")
+                        .tag(Panel.about)
+                }
             }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(220)
+        } detail: {
+            // --- DETAIL VIEW (CONTENT) ---
+            VStack {
+                if let panel = selectedPanel {
+                    switch panel {
+                    case .general:
+                        GeneralSettingsView(coordinator: coordinator)
+                    case .diagnostics:
+                        DiagnosticsView(coordinator: coordinator)
+                    case .about:
+                        AboutSettingsView()
+                    }
+                } else {
+                    Text("Select a category")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 400, height: 500)
+        .navigationSplitViewStyle(.balanced)
+        .frame(width: 800, height: 500)
         .sheet(isPresented: $showingHotKeyEditor) {
             HotKeyEditorView(coordinator: coordinator)
         }
         .sheet(isPresented: $showingSymbolsEditor) {
             SymbolsEditorView(appCoordinator: coordinator)
         }
-        .sheet(isPresented: $showingAboutWindow) {
-            AboutView()
-        }
         .sheet(isPresented: $showingExclusionsView) {
             ExclusionsView(exclusionManager: coordinator.exclusionManager)
+        }
+        .sheet(isPresented: $showingDefaultLayoutsEditor) {
+            DefaultLayoutsView(
+                smartLayoutManager: coordinator.smartLayoutManager,
+                keyboardLayoutManager: coordinator.keyboardLayoutManager
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .openHotKeyEditor)) { _ in
             showingHotKeyEditor = true
@@ -106,214 +94,23 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSymbolsEditor)) { _ in
             showingSymbolsEditor = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openDefaultLayoutsEditor)) { _ in
+            showingDefaultLayoutsEditor = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showAboutWindow)) { _ in
-            showingAboutWindow = true
-        }
-    }
-    
-    // MARK: - Main Tab View
-    private var mainTabView: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Hotkey & Symbols Configuration
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "keyboard")
-                            .foregroundColor(.blue)
-                        Text("Hotkey & Symbols Configuration")
-                            .font(.headline)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Hotkey:")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button(coordinator.hotKeyManager.hotKey.displayString) {
-                                showingHotKeyEditor = true
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        
-                        HStack {
-                            Text("Symbols:")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button("Edit Symbols") {
-                                showingSymbolsEditor = true
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-                
-                // Hotkey Blocker Configuration
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "lock.shield")
-                            .foregroundColor(.orange)
-                        Text("Hotkey Blocker Protection")
-                            .font(.headline)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Block accidental Cmd+Q")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Toggle("", isOn: Binding(
-                                get: { coordinator.hotkeyBlockerManager.isCmdQEnabled },
-                                set: { newValue in
-                                    print("🔄 UI: Cmd+Q toggle changed to \(newValue)")
-                                    coordinator.hotkeyBlockerManager.isCmdQEnabled = newValue
-                                    uiRefreshTrigger.toggle()
-                                }
-                            ))
-                            .id("cmdq-toggle-\(uiRefreshTrigger)")
-                        }
-                        
-                        HStack {
-                            Text("Block accidental Cmd+W")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Toggle("", isOn: Binding(
-                                get: { coordinator.hotkeyBlockerManager.isCmdWEnabled },
-                                set: { newValue in
-                                    print("🔄 UI: Cmd+W toggle changed to \(newValue)")
-                                    coordinator.hotkeyBlockerManager.isCmdWEnabled = newValue
-                                    uiRefreshTrigger.toggle()
-                                }
-                            ))
-                            .id("cmdw-toggle-\(uiRefreshTrigger)")
-                        }
-                        
-                        if coordinator.hotkeyBlockerManager.isCmdQEnabled || coordinator.hotkeyBlockerManager.isCmdWEnabled {
-                            HStack {
-                                Text("Delay (seconds):")
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Stepper("\(coordinator.hotkeyBlockerManager.delay)", value: $coordinator.hotkeyBlockerManager.delay, in: 1...5)
-                                    .onChange(of: coordinator.hotkeyBlockerManager.delay) { _, _ in
-                                        coordinator.hotkeyBlockerManager.saveSettings()
-                                    }
-                            }
-                            
-                            if coordinator.hotkeyBlockerManager.isCmdQEnabled {
-                                HStack {
-                                    Text("Accidental quits prevented:")
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    Text("\(coordinator.hotkeyBlockerManager.accidentalQuits)")
-                                        .font(.system(.body, design: .monospaced))
-                                        .foregroundColor(.green)
-                                }
-                            }
-                            
-                            if coordinator.hotkeyBlockerManager.isCmdWEnabled {
-                                HStack {
-                                    Text("Accidental closes prevented:")
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    Text("\(coordinator.hotkeyBlockerManager.accidentalCloses)")
-                                        .font(.system(.body, design: .monospaced))
-                                        .foregroundColor(.green)
-                                }
-                            }
-                            
-                            HStack {
-                                Button("Manage Exclusions") {
-                                    showingExclusionsView = true
-                                }
-                                .buttonStyle(.bordered)
-                                .help("Configure which applications should be excluded from Hotkey Blocker protection")
-                                
-                                Button("Sync State") {
-                                    coordinator.hotkeyBlockerManager.syncState()
-                                    uiRefreshTrigger.toggle()
-                                }
-                                .buttonStyle(.bordered)
-                                .help("Synchronize UI state with actual monitoring status")
-                            }
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-            }
-            .padding()
-        }
-    }
-    
-    // MARK: - Testing tab
-    private var testingTabView: some View {
-        VStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Test Text Conversion")
-                    .font(.headline)
-                
-                Text("Enter text to test the conversion:")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            
-            VStack(spacing: 12) {
-                TextField("Enter text here...", text: $testText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(3...6)
-                
-                Button("Convert") {
-                    transformedText = coordinator.textTransformer.transformText(testText)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(testText.isEmpty)
-                
-                if !transformedText.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Result:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Text(transformedText)
-                            .font(.system(.body, design: .monospaced))
-                            .padding()
-                            .background(Color(NSColor.controlBackgroundColor))
-                            .cornerRadius(8)
-                    }
-                }
-            }
-            
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Helper components
-struct InfoRow: View {
-    let title: String
-    let value: String
-    
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .font(.caption)
-                .fontWeight(.medium)
+            selectedPanel = .about
         }
     }
 }
 
-
-
-
-
+// Notifications for opening modal windows
+extension Notification.Name {
+    static let openDefaultLayoutsEditor = Notification.Name("openDefaultLayoutsEditor")
+    static let showAboutWindow = Notification.Name("showAboutWindow")
+    static let openHotKeyEditor = Notification.Name("openHotKeyEditor")
+    static let openSymbolsEditor = Notification.Name("openSymbolsEditor")
+    static let openExclusionsView = Notification.Name("openExclusionsView")
+}
 
 #Preview {
     ContentView(coordinator: AppCoordinator())

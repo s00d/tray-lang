@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct tray_langApp: App {
@@ -20,78 +21,54 @@ struct tray_langApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var isInitialized = false
     private var coordinator: AppCoordinator!
-    private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
+    private var cancellables = Set<AnyCancellable>()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard !isInitialized else { return }
-        isInitialized = true
-        
         // Инициализируем координатор
         coordinator = AppCoordinator()
         
-        // Скрываем иконку в доке сразу при запуске
-        coordinator.hideDockIcon()
+        // Делегируем всю работу с UI WindowManager'у
+        coordinator.windowManager.setCoordinator(coordinator)
+        coordinator.windowManager.setupStatusBar()
         
-        // Настраиваем UI
-        setupStatusItem()
+        // Подписываемся на смену раскладки для обновления иконки
+        coordinator.keyboardLayoutManager.$currentLayout
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newLayout in
+                self?.coordinator.windowManager.updateStatusItemTitle(shortName: newLayout?.shortName ?? "")
+            }
+            .store(in: &cancellables)
         
         // Запускаем приложение
         coordinator.start()
-    }
-    
-    func setupStatusItem() {
-        guard statusItem == nil else { return }
         
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        
-        if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Tray Lang")
-            button.action = #selector(togglePopover)
-            button.target = self
+        // Этот трюк работает, давая системе завершить цикл запуска,
+        // после чего мы устанавливаем финальное состояние иконки.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.coordinator.hideDockIcon()
         }
-        
-        setupPopover()
-    }
-    
-    private func setupPopover() {
-        popover = NSPopover()
-        popover?.contentSize = NSSize(width: 250, height: 300)
-        popover?.behavior = .transient
-        popover?.contentViewController = NSHostingController(
-            rootView: TrayMenuView(coordinator: coordinator)
-        )
-    }
-    
-    @objc private func togglePopover() {
-        guard let button = statusItem?.button else { return }
-        
-        // Принудительно скрываем иконку в доке
-        coordinator.hideDockIcon()
-        
-        if popover?.isShown == true {
-            popover?.performClose(nil)
-        } else {
-            popover?.contentViewController = NSHostingController(
-                rootView: TrayMenuView(coordinator: coordinator)
-            )
-            popover?.show(relativeTo: button.bounds, of: button, preferredEdge: NSRectEdge.minY)
-        }
-    }
-    
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return false
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        coordinator.stop()
+        // Используем `?` для безопасного вызова
+        coordinator?.stop()
+    }
+    
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        print("Получен запрос на завершение работы...")
+        // Выполняем все необходимые действия по очистке до того, как приложение закроется
+        coordinator?.stop()
+        // Сообщаем системе, что мы готовы к завершению
+        return .terminateNow
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        coordinator.accessibilityManager.updateAccessibilityStatus()
-        // Принудительно скрываем иконку в доке при активации
-        coordinator.hideDockIcon()
+        coordinator?.accessibilityManager.updateAccessibilityStatus()
+        // Убрали hideDockIcon() отсюда - иконка управляется только через WindowManager
+    }
+    
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false // Приложение продолжает работать в трее
     }
 }

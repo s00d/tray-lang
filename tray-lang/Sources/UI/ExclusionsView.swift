@@ -28,85 +28,40 @@ struct ExclusionsView: View {
             Divider()
             
             // Content
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Applications in this list will not be protected by Hotkey Blocker. Cmd+Q and Cmd+W will work normally for these apps.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                
-                if exclusionManager.excludedApps.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "app.badge.plus")
-                            .font(.system(size: 32))
+            List {
+                Section {
+                    // Проверяем, пуст ли список
+                    if exclusionManager.excludedApps.isEmpty {
+                        Text("No applications excluded.")
                             .foregroundColor(.secondary)
-                        Text("No excluded apps")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        Text("Add applications to exclude them from Hotkey Blocker protection")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Excluded Applications:")
-                                .font(.headline)
-                            Spacer()
-                            Button("Add Apps") {
-                                addApps()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                            .padding()
+                    } else {
+                        ForEach(exclusionManager.excludedApps) { app in
+                            ExclusionRowView(app: app) {
+                                exclusionManager.removeExcludedApp(app)
                             }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(.horizontal)
-                        
-                        ScrollView {
-                            LazyVStack(spacing: 8) {
-                                ForEach(exclusionManager.excludedApps) { app in
-                                    HStack {
-                                        Image(systemName: "app.fill")
-                                            .foregroundColor(.blue)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(app.name)
-                                                .font(.subheadline)
-                                                .fontWeight(.medium)
-                                            Text(app.bundleID)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Spacer()
-                                        Button("Remove") {
-                                            exclusionManager.removeExcludedApp(app)
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 8)
-                                    .background(Color(NSColor.controlBackgroundColor))
-                                    .cornerRadius(6)
-                                }
-                            }
-                            .padding(.horizontal)
                         }
                     }
+                } header: {
+                    HStack {
+                        Text("Excluded Applications")
+                        Spacer()
+                        Button("Add Application...") {
+                            addApps()
+                        }
+                    }
+                } footer: {
+                    Text("Cmd+Q and Cmd+W protection will be disabled for apps in this list.")
                 }
             }
-            .padding()
-            
+            .listStyle(.inset(alternatesRowBackgrounds: true))
+
             Divider()
             
             // Footer buttons
             HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .buttonStyle(.plain)
-                
                 Spacer()
-                
                 Button("Done") {
                     dismiss()
                 }
@@ -114,7 +69,7 @@ struct ExclusionsView: View {
             }
             .padding()
         }
-        .frame(width: 500, height: 400)
+        .frame(width: 600, height: 450)
     }
     
     private func addApps() {

@@ -23,6 +23,9 @@ class AppCoordinator: ObservableObject {
     // Exclusion Manager
     let exclusionManager: ExclusionManager
     
+    // Smart Layout Manager
+    var smartLayoutManager: SmartLayoutManager
+    
     init() {
         // Инициализируем core managers
         keyboardLayoutManager = KeyboardLayoutManager()
@@ -43,6 +46,9 @@ class AppCoordinator: ObservableObject {
         
         // Инициализируем HotkeyBlocker manager
         hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
+        
+        // Инициализируем SmartLayoutManager
+        smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
         
         // Устанавливаем связи
         windowManager.setCoordinator(self)
@@ -76,8 +82,14 @@ class AppCoordinator: ObservableObject {
     func start() {
         print("🚀 Приложение запущено")
         
-        // Запрашиваем права доступа
+        // Запрашиваем права доступа только если не в режиме разработки
+        #if !DEBUG
         accessibilityManager.requestAccessibilityPermissions()
+        #else
+        // В режиме разработки просто устанавливаем статус как granted
+        accessibilityManager.accessibilityStatus = .granted
+        print("🔧 Режим разработки: права доступа установлены автоматически")
+        #endif
         
         // Запускаем мониторинг горячих клавиш только если права уже предоставлены
         if accessibilityManager.isAccessibilityGranted() {

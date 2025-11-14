@@ -2,6 +2,13 @@ import Foundation
 import AppKit
 import ApplicationServices
 
+// НОВЫЙ ENUM для статуса выделения
+enum SelectionStatus {
+    case selected
+    case notSelected
+    case unknown // Не удалось определить (например, приложение не отвечает)
+}
+
 // MARK: - Text Processing Manager
 class TextProcessingManager: ObservableObject {
     private let textTransformer: TextTransformer
@@ -12,16 +19,81 @@ class TextProcessingManager: ObservableObject {
         self.keyboardLayoutManager = keyboardLayoutManager
     }
     
-    // MARK: - Text Processing
-    func processSelectedText() {
-        print("🔄 Выполняем переключение раскладки...")
+    // MARK: - Pre-check
+    // ИЗМЕНЕННАЯ функция проверки
+    private func checkSelectionStatus() -> SelectionStatus {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            print("🔍 checkSelectionStatus: Не удалось получить активное приложение.")
+            return .unknown
+        }
+        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
         
-        guard let selectedText = getSelectedText() else {
-            print("❌ Не удалось получить выделенный текст")
-            return
+        var focusedElement: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success,
+              let element = focusedElement else {
+            print("🔍 checkSelectionStatus: Не удалось получить элемент в фокусе.")
+            return .unknown
+        }
+              
+        var selectedRange: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element as! AXUIElement, kAXSelectedTextRangeAttribute as CFString, &selectedRange) == .success,
+              let rangeValue = selectedRange else {
+            print("🔍 checkSelectionStatus: Элемент не поддерживает kAXSelectedTextRangeAttribute. Статус неизвестен.")
+            return .unknown // Ключевое изменение: если API не поддерживается, мы не знаем статус
+        }
+              
+        var range = CFRange()
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else {
+            print("🔍 checkSelectionStatus: Не удалось конвертировать диапазон.")
+            return .unknown
         }
         
-        let transformedText = textTransformer.transformText(selectedText)
+        if range.length > 0 {
+            print("🔍 checkSelectionStatus: Текст выделен (длина: \(range.length)).")
+            return .selected
+        } else {
+            print("🔍 checkSelectionStatus: Текст не выделен.")
+            return .notSelected
+        }
+    }
+    
+    // MARK: - Text Processing
+    // ПОЛНОСТЬЮ НОВАЯ ЛОГИКА
+    func processSelectedText() {
+        let status = checkSelectionStatus()
+        
+        switch status {
+        case .notSelected:
+            print("🤷 Текст не выделен. Операция отменена.")
+            return
+            
+        case .selected:
+            print("🔄 Текст выделен, запускаем полную цепочку методов...")
+            // Запускаем полную цепочку, так как приложение "отзывчивое"
+            guard let selectedText = getSelectedText() else {
+                print("❌ Не удалось получить выделенный текст, хотя выделение было обнаружено.")
+                return
+            }
+            performTransformation(with: selectedText)
+            
+        case .unknown:
+            print("🤔 Статус выделения неизвестен. Приложение может быть несовместимо с Accessibility API. Пробуем запасной метод...")
+            // Приложение "неразговорчивое", пропускаем методы Accessibility и сразу идем к буферу обмена.
+            do {
+                if let selectedText = try getSelectedTextViaHotkeys() {
+                    performTransformation(with: selectedText)
+                } else {
+                    print("❌ Запасной метод также не смог получить текст.")
+                }
+            } catch {
+                print("❌ Ошибка при выполнении запасного метода: \(error)")
+            }
+        }
+    }
+    
+    // Вспомогательная функция, чтобы не дублировать код
+    private func performTransformation(with text: String) {
+        let transformedText = textTransformer.transformText(text)
         print("🔄 Трансформированный текст: \(transformedText)")
         
         if replaceSelectedText(with: transformedText) {
@@ -134,54 +206,87 @@ class TextProcessingManager: ObservableObject {
     }
     
     private func getSelectedTextViaHotkeys() throws -> String? {
-        print("  🔍 Выполняем AppleScript для получения текста...")
+        print("  🔍 Выполняем копирование через CGEvent и NSPasteboard...")
         
-        // Используем AppleScript для получения выделенного текста с сохранением позиции
-        let script = """
-        tell application "System Events"
-            set originalClipboard to the clipboard
-            try
-                -- Копируем выделенный текст (Cmd+C)
-                key code 8 using {command down}
-                delay 0.1
-                set selectedText to the clipboard
-                -- Восстанавливаем оригинальный буфер обмена
-                set the clipboard to originalClipboard
-                return selectedText
-            on error
-                -- Восстанавливаем оригинальный буфер обмена в случае ошибки
-                set the clipboard to originalClipboard
-                return ""
-            end try
-        end tell
-        """
+        return getSelectedTextViaPasteboard()
+    }
+    
+    // MARK: - Reliable Pasteboard Methods
+    private func getSelectedTextViaPasteboard() -> String? {
+        let pasteboard = NSPasteboard.general
         
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        
-        do {
-            try task.run()
-            task.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if !output.isEmpty && output != "error" {
-                    print("  ✅ Текст получен через AppleScript: '\(output)'")
-                    return output
-                } else {
-                    print("  ❌ AppleScript вернул пустой результат или ошибку: '\(output)'")
-                }
-            }
-        } catch {
-            print("  ❌ Ошибка при выполнении AppleScript: \(error)")
-            throw error
+        // 1. Сохраняем текущее состояние буфера обмена
+        let originalChangeCount = pasteboard.changeCount
+        var originalContent: String? = nil
+        if let originalString = pasteboard.string(forType: .string) {
+            originalContent = originalString
         }
         
-        return nil
+        print("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
+        
+        // 2. Симулируем Cmd+C
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let cmdCDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true),
+              let cmdCUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false) else {
+            print("  ❌ Не удалось создать события клавиатуры")
+            return nil
+        }
+        
+        cmdCDown.flags = .maskCommand
+        cmdCUp.flags = .maskCommand
+        
+        cmdCDown.post(tap: .cghidEventTap)
+        cmdCUp.post(tap: .cghidEventTap)
+        
+        print("  ⌨️ Отправлено событие Cmd+C")
+        
+        // 3. Ждем изменения буфера обмена (до 0.5 секунды)
+        let startTime = Date()
+        let timeout: TimeInterval = 0.5
+        var newChangeCount = pasteboard.changeCount
+        
+        while newChangeCount == originalChangeCount && Date().timeIntervalSince(startTime) < timeout {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+            newChangeCount = pasteboard.changeCount
+        }
+        
+        // 4. Проверяем, изменился ли буфер обмена
+        guard newChangeCount != originalChangeCount else {
+            print("  ❌ Буфер обмена не изменился в течение таймаута")
+            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+            return nil
+        }
+        
+        // 5. Читаем новый текст
+        guard let newText = pasteboard.string(forType: .string), !newText.isEmpty else {
+            print("  ❌ Не удалось прочитать текст из буфера обмена")
+            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+            return nil
+        }
+        
+        print("  ✅ Текст получен через NSPasteboard: '\(newText)' (changeCount: \(newChangeCount))")
+        
+        // 6. Восстанавливаем оригинальный буфер обмена
+        restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+        
+        return newText
+    }
+    
+    private func restorePasteboard(originalContent: String?, originalChangeCount: Int) {
+        let pasteboard = NSPasteboard.general
+        
+        // Восстанавливаем только если содержимое действительно изменилось
+        if let original = originalContent {
+            pasteboard.clearContents()
+            pasteboard.setString(original, forType: .string)
+            print("  🔄 Буфер обмена восстановлен")
+        } else {
+            // Если оригинального содержимого не было, просто очищаем
+            if pasteboard.changeCount != originalChangeCount {
+                pasteboard.clearContents()
+                print("  🔄 Буфер обмена очищен")
+            }
+        }
     }
     
     // MARK: - Text Replacement
@@ -212,62 +317,72 @@ class TextProcessingManager: ObservableObject {
     }
     
     private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
-        print("  🔍 Выполняем AppleScript для замены текста...")
+        print("  🔍 Выполняем замену текста через CGEvent и NSPasteboard...")
         
-        // Используем AppleScript для замены текста с оптимизированной логикой
-        let script = """
-        tell application "System Events"
-            set originalClipboard to the clipboard
-            try
-                -- Копируем выделенный текст
-                key code 8 using {command down}
-                delay 0.1
-                set selectedText to the clipboard
-                
-                -- Помещаем новый текст в буфер обмена
-                set the clipboard to "\(newText)"
-                delay 0.1
-                
-                -- Вставляем новый текст
-                key code 9 using {command down}
-                delay 0.1
-                
-                -- Восстанавливаем оригинальный буфер обмена
-                set the clipboard to originalClipboard
-                return "success"
-            on error errMsg
-                -- Восстанавливаем оригинальный буфер обмена в случае ошибки
-                set the clipboard to originalClipboard
-                return "error: " & errMsg
-            end try
-        end tell
-        """
+        return replaceTextViaPasteboard(newText)
+    }
+    
+    private func replaceTextViaPasteboard(_ newText: String) -> Bool {
+        let pasteboard = NSPasteboard.general
         
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        
-        do {
-            try task.run()
-            task.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if output.hasPrefix("success") {
-                    print("  ✅ AppleScript успешно выполнен")
-                    return true
-                } else {
-                    print("  ❌ AppleScript вернул ошибку: '\(output)'")
-                }
-            }
-        } catch {
-            print("  ❌ Ошибка при выполнении AppleScript: \(error)")
+        // 1. Сохраняем текущее состояние буфера обмена
+        let originalChangeCount = pasteboard.changeCount
+        var originalContent: String? = nil
+        if let originalString = pasteboard.string(forType: .string) {
+            originalContent = originalString
         }
         
-        return false
+        print("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
+        
+        // 2. Помещаем новый текст в буфер обмена
+        pasteboard.clearContents()
+        pasteboard.setString(newText, forType: .string)
+        
+        // 3. Ждем, пока буфер обмена обновится (проверяем changeCount)
+        let startTime = Date()
+        let timeout: TimeInterval = 0.5
+        var newChangeCount = pasteboard.changeCount
+        
+        while newChangeCount == originalChangeCount && Date().timeIntervalSince(startTime) < timeout {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+            newChangeCount = pasteboard.changeCount
+        }
+        
+        // 4. Проверяем, что текст действительно установлен
+        guard let pasteboardText = pasteboard.string(forType: .string),
+              pasteboardText == newText else {
+            print("  ❌ Не удалось установить текст в буфер обмена")
+            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+            return false
+        }
+        
+        print("  📋 Текст установлен в буфер обмена (changeCount: \(newChangeCount))")
+        
+        // 5. Симулируем Cmd+V для вставки
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            print("  ❌ Не удалось создать события клавиатуры")
+            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+            return false
+        }
+        
+        cmdVDown.flags = .maskCommand
+        cmdVUp.flags = .maskCommand
+        
+        cmdVDown.post(tap: .cghidEventTap)
+        cmdVUp.post(tap: .cghidEventTap)
+        
+        print("  ⌨️ Отправлено событие Cmd+V")
+        
+        // 6. Небольшая задержка после вставки
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        
+        // 7. Восстанавливаем оригинальный буфер обмена
+        restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+        
+        print("  ✅ Замена текста выполнена успешно")
+        return true
     }
     
     private func replaceTextViaAccessibility(_ newText: String) -> Bool {
