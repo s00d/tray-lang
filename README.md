@@ -14,7 +14,9 @@
 
 A powerful macOS application that transforms text between keyboard layouts, prevents accidental app quits, and intelligently manages keyboard layouts per application.
 
-![Tray Lang App](assets/app-min.png)
+![Tray Lang App 1](assets/app1.png)
+![Tray Lang App 2](assets/app2.png)
+![Tray Lang App 3](assets/app3.png)
 
 ## What it does
 
