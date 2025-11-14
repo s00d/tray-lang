@@ -128,33 +128,42 @@ class AppCoordinator: ObservableObject {
     func start() {
         print("🚀 Приложение запущено")
         
-        // Запрашиваем права, если их нет
-        #if !DEBUG
-        if !accessibilityManager.isAccessibilityGranted() {
-            accessibilityManager.requestAccessibilityPermissions()
-        }
-        #else
-        // В режиме разработки просто устанавливаем статус как granted
-        accessibilityManager.accessibilityStatus = .granted
-        print("🔧 Режим разработки: права доступа установлены автоматически")
-        #endif
+        // Мы больше не проверяем права немедленно.
+        // Вместо этого мы откладываем всю логику запуска.
         
-        // Сразу активируем функции, которые были включены
-        if accessibilityManager.isAccessibilityGranted() {
-            if isTextConversionEnabled {
-                hotKeyManager.startMonitoring()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            
+            print("✅ Запускаем основные сервисы после задержки...")
+            
+            // Теперь, спустя полсекунды, проверка прав будет корректной.
+            if !self.accessibilityManager.isAccessibilityGranted() {
+                #if !DEBUG
+                self.accessibilityManager.requestAccessibilityPermissions()
+                #else
+                // В режиме разработки просто устанавливаем статус как granted
+                self.accessibilityManager.accessibilityStatus = .granted
+                print("🔧 Режим разработки: права доступа установлены автоматически")
+                #endif
             }
-            if isCmdQBlockerEnabled || isCmdWBlockerEnabled {
-                startHotkeyBlocker()
+            
+            // Активируем функции, которые были включены
+            if self.accessibilityManager.isAccessibilityGranted() {
+                if self.isTextConversionEnabled {
+                    self.hotKeyManager.startMonitoring()
+                }
+                if self.isCmdQBlockerEnabled || self.isCmdWBlockerEnabled {
+                    self.startHotkeyBlocker()
+                }
+            }
+            
+            // Синхронизируем состояние HotkeyBlocker
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.hotkeyBlockerManager.syncState()
             }
         }
         
-        // Синхронизируем состояние HotkeyBlocker
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.hotkeyBlockerManager.syncState()
-        }
-        
-        // Загружаем пользовательские символы
+        // Загрузку профилей можно оставить здесь, она не зависит от прав
         textTransformer.loadSymbols()
     }
     

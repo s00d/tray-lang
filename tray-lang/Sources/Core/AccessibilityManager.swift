@@ -41,55 +41,44 @@ enum AccessibilityStatus {
 class AccessibilityManager: ObservableObject {
     @Published var accessibilityStatus: AccessibilityStatus = .unknown
     
-    private var statusCheckTimer: Timer?
     private var isRequestingPermissions = false
     private var permissionAlert: NSAlert?
     
     init() {
-        updateAccessibilityStatus()
+        // Выполняем первую проверку с небольшой задержкой
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.updateAccessibilityStatus()
+        }
         setupStatusMonitoring()
     }
     
     deinit {
-        statusCheckTimer?.invalidate()
         DistributedNotificationCenter.default.removeObserver(self)
     }
     
     // MARK: - Status Management
-    func updateAccessibilityStatus() {
-        let accessibilityEnabled = AXIsProcessTrusted()
-        accessibilityStatus = accessibilityEnabled ? .granted : .denied
+    @objc func updateAccessibilityStatus() {
+        let wasGranted = accessibilityStatus == .granted
+        let isNowTrusted = AXIsProcessTrusted()
+        
+        accessibilityStatus = isNowTrusted ? .granted : .denied
+        
+        // Если права только что были предоставлены, отправляем уведомление
+        if !wasGranted && isNowTrusted {
+            print("✅ Права доступа предоставлены! Отправляем уведомление.")
+            NotificationCenter.default.post(name: .accessibilityGranted, object: nil)
+        }
     }
     
     private func setupStatusMonitoring() {
-        // Подписываемся на системное уведомление об изменении настроек доступности
+        // Самый надежный способ: слушать системное уведомление.
+        // Оно срабатывает, когда пользователь меняет галочку в настройках.
         DistributedNotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleAccessibilitySettingsChanged),
-            name: NSNotification.Name("com.apple.accessibility.api"),
+            selector: #selector(updateAccessibilityStatus),
+            name: NSNotification.Name("com.apple.accessibility.api.user-settings-changed"),
             object: nil
         )
-        
-        // Также оставляем таймер как резервный механизм (на случай, если уведомление не сработает)
-        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.checkAccessibilityStatus()
-        }
-    }
-    
-    @objc private func handleAccessibilitySettingsChanged() {
-        print("🔔 Получено уведомление об изменении настроек доступности")
-        checkAccessibilityStatus()
-    }
-    
-    private func checkAccessibilityStatus() {
-        let wasGranted = accessibilityStatus == .granted
-        updateAccessibilityStatus()
-        
-        // Если права только что были предоставлены, уведомляем об этом
-        if !wasGranted && accessibilityStatus == .granted {
-            print("✅ Права доступа предоставлены!")
-            NotificationCenter.default.post(name: .accessibilityGranted, object: nil)
-        }
     }
     
     // MARK: - Permission Request
@@ -162,4 +151,4 @@ class AccessibilityManager: ObservableObject {
 // MARK: - Notifications
 extension Notification.Name {
     static let accessibilityGranted = Notification.Name("accessibilityGranted")
-} 
+}
