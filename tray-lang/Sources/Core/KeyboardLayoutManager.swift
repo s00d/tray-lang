@@ -117,9 +117,11 @@ class KeyboardLayoutManager: ObservableObject {
         
         // Используем compactMap для фильтрации и трансформации
         return inputSources.compactMap { source in
-            guard let categoryPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory),
-                  let category = Unmanaged<CFString>.fromOpaque(categoryPtr).takeUnretainedValue() as? String,
-                  category == (kTISCategoryKeyboardInputSource as String) else {
+            guard let categoryPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory) else {
+                return nil
+            }
+            let category = Unmanaged<CFString>.fromOpaque(categoryPtr).takeUnretainedValue() as String
+            guard category == (kTISCategoryKeyboardInputSource as String) else {
                 return nil
             }
             return extractLayoutInfo(from: source)

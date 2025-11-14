@@ -17,10 +17,10 @@ struct RememberedLayout: Identifiable, Hashable {
     var layoutName: String
     
     var appIcon: NSImage? {
-        guard let path = NSWorkspace.shared.absolutePathForApplication(withBundleIdentifier: appBundleID) else {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) else {
             return nil
         }
-        return NSWorkspace.shared.icon(forFile: path)
+        return NSWorkspace.shared.icon(forFile: url.path)
     }
 }
 
@@ -205,8 +205,8 @@ class SmartLayoutManager: ObservableObject {
 // Добавьте это расширение в конец файла для удобства
 extension NSWorkspace {
     func applicationName(for bundleIdentifier: String) -> String {
-        if let path = self.absolutePathForApplication(withBundleIdentifier: bundleIdentifier),
-           let bundle = Bundle(path: path) {
+        if let url = self.urlForApplication(withBundleIdentifier: bundleIdentifier),
+           let bundle = Bundle(url: url) {
             return bundle.localizedInfoDictionary?["CFBundleName"] as? String ?? bundle.infoDictionary?["CFBundleName"] as? String ?? bundleIdentifier
         }
         return bundleIdentifier

@@ -10,8 +10,9 @@ struct GeneralSettingsView: View {
             Section(header: Text("Permissions & Status")) {
                 SettingsRow(icon: "lock.shield", iconColor: coordinator.isAccessibilityGranted ? .green : .red, title: "Accessibility", subtitle: coordinator.isAccessibilityGranted ? "Granted" : "Required") {
                     Button(coordinator.isAccessibilityGranted ? "Granted" : "Grant...") {
-                        Task { @MainActor in
-                            coordinator.accessibilityManager.requestPermissions()
+                        Task {
+                            // Кнопка просто просит показать диалог или настройки
+                            await coordinator.accessibilityManager.requestPermissions()
                         }
                     }
                     .disabled(coordinator.isAccessibilityGranted)

@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 // MARK: - Window Manager
+@MainActor
 class WindowManager: NSObject, ObservableObject, NSMenuDelegate {
     private var mainWindow: NSWindow?
     private var coordinator: AppCoordinator?

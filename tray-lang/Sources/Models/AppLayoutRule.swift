@@ -9,10 +9,10 @@ struct AppLayoutRule: Identifiable, Codable, Hashable {
     
     // Вспомогательное свойство для отображения иконки приложения
     var appIcon: NSImage? {
-        guard let path = NSWorkspace.shared.absolutePathForApplication(withBundleIdentifier: appBundleID) else {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) else {
             return nil
         }
-        return NSWorkspace.shared.icon(forFile: path)
+        return NSWorkspace.shared.icon(forFile: url.path)
     }
 }
 

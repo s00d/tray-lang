@@ -22,9 +22,37 @@ help:
 # Build targets
 build:
 	xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Debug build
+	@echo ""
+	@echo "✅ Build completed successfully!"
+	@BUILD_DIR=$$(xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Debug -showBuildSettings 2>/dev/null | grep "^[[:space:]]*BUILT_PRODUCTS_DIR[[:space:]]*=" | head -1 | sed 's/.*=[[:space:]]*//' | xargs); \
+	APP_NAME=$$(xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Debug -showBuildSettings 2>/dev/null | grep "^[[:space:]]*PRODUCT_NAME[[:space:]]*=" | head -1 | sed 's/.*=[[:space:]]*//' | xargs); \
+	if [ -n "$$BUILD_DIR" ] && [ -n "$$APP_NAME" ]; then \
+		APP_PATH="$$BUILD_DIR/$$APP_NAME.app"; \
+		if [ -d "$$APP_PATH" ]; then \
+			echo "📦 Application built at: $$APP_PATH"; \
+		else \
+			echo "📦 Application built at: build/Debug/tray-lang.app"; \
+		fi; \
+	else \
+		echo "📦 Application built at: build/Debug/tray-lang.app"; \
+	fi
 
 build-release:
 	xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release build
+	@echo ""
+	@echo "✅ Release build completed successfully!"
+	@BUILD_DIR=$$(xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -showBuildSettings 2>/dev/null | grep "^[[:space:]]*BUILT_PRODUCTS_DIR[[:space:]]*=" | head -1 | sed 's/.*=[[:space:]]*//' | xargs); \
+	APP_NAME=$$(xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -showBuildSettings 2>/dev/null | grep "^[[:space:]]*PRODUCT_NAME[[:space:]]*=" | head -1 | sed 's/.*=[[:space:]]*//' | xargs); \
+	if [ -n "$$BUILD_DIR" ] && [ -n "$$APP_NAME" ]; then \
+		APP_PATH="$$BUILD_DIR/$$APP_NAME.app"; \
+		if [ -d "$$APP_PATH" ]; then \
+			echo "📦 Application built at: $$APP_PATH"; \
+		else \
+			echo "📦 Application built at: build/Release/tray-lang.app"; \
+		fi; \
+	else \
+		echo "📦 Application built at: build/Release/tray-lang.app"; \
+	fi
 
 # Test targets
 test:

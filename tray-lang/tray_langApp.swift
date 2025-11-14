@@ -64,8 +64,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        // updateStatus() вызывается автоматически через DistributedNotificationCenter
-        // Убрали hideDockIcon() отсюда - иконка управляется только через WindowManager
+        // Принудительно проверяем состояние, когда окно становится активным
+        coordinator?.updateUIState()
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
