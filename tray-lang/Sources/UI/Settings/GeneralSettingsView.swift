@@ -7,24 +7,26 @@ struct GeneralSettingsView: View {
     
     var body: some View {
         Form {
-            Section(header: Text("Status")) {
+            Section(header: Text("Permissions & Status")) {
+                SettingsRow(icon: "lock.shield", iconColor: coordinator.isAccessibilityGranted ? .green : .red, title: "Accessibility", subtitle: coordinator.isAccessibilityGranted ? "Granted" : "Required") {
+                    Button(coordinator.isAccessibilityGranted ? "Granted" : "Grant...") {
+                        Task { @MainActor in
+                            coordinator.accessibilityManager.requestPermissions()
+                        }
+                    }
+                    .disabled(coordinator.isAccessibilityGranted)
+                }
+                
                 HStack(spacing: 16) {
                     StatusIndicator(
-                        isActive: coordinator.isTextConversionEnabled,
+                        isActive: coordinator.isTextConversionEnabled && coordinator.isAccessibilityGranted, // Добавили проверку прав
                         icon: "keyboard",
                         color: .green,
                         tooltip: "Hotkey Active"
                     )
                     
                     StatusIndicator(
-                        isActive: coordinator.accessibilityManager.isAccessibilityGranted(),
-                        icon: "lock.shield",
-                        color: .blue,
-                        tooltip: "Accessibility Granted"
-                    )
-                    
-                    StatusIndicator(
-                        isActive: coordinator.hotkeyBlockerManager.isCmdQEnabled || coordinator.hotkeyBlockerManager.isCmdWEnabled,
+                        isActive: (coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled) && coordinator.isAccessibilityGranted, // Добавили проверку прав
                         icon: "shield",
                         color: .orange,
                         tooltip: "Protection Active"

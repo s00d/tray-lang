@@ -64,7 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        coordinator?.accessibilityManager.updateAccessibilityStatus()
+        // updateStatus() вызывается автоматически через DistributedNotificationCenter
         // Убрали hideDockIcon() отсюда - иконка управляется только через WindowManager
     }
     

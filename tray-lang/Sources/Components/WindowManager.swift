@@ -95,7 +95,9 @@ class WindowManager: NSObject, ObservableObject, NSMenuDelegate {
     
     @objc func toggleSmartLayout() {
         guard let coordinator = coordinator else { return }
-        coordinator.smartLayoutManager.isEnabled.toggle()
+        Task { @MainActor in
+            coordinator.smartLayoutManager.isEnabled.toggle()
+        }
     }
     
     @objc func showAboutWindow() {

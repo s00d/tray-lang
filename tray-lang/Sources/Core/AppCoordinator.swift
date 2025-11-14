@@ -2,15 +2,15 @@ import Foundation
 import SwiftUI
 import Combine
 
-// MARK: - App Coordinator
+@MainActor
 class AppCoordinator: ObservableObject {
     // --- UI State Properties ---
-    // Эти свойства - ЕДИНСТВЕННЫЙ источник правды для всего UI
     @Published var isAutoLaunchEnabled: Bool
     @Published var isTextConversionEnabled: Bool
     @Published var isCmdQBlockerEnabled: Bool
     @Published var isCmdWBlockerEnabled: Bool
-    
+    @Published var isAccessibilityGranted: Bool
+
     // --- Core Managers ---
     let keyboardLayoutManager: KeyboardLayoutManager
     let hotKeyManager: HotKeyManager
@@ -24,6 +24,7 @@ class AppCoordinator: ObservableObject {
     let notificationManager: NotificationManager
     let windowManager: WindowManager
     
+    private var uiUpdateTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     
     init() {
@@ -40,131 +41,110 @@ class AppCoordinator: ObservableObject {
         self.hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
         self.windowManager = WindowManager()
         
-        // --- Инициализация состояния UI из UserDefaults ---
+        // --- Первоначальная инициализация состояния ---
         self.isAutoLaunchEnabled = autoLaunchManager.isAutoLaunchEnabled()
         self.isTextConversionEnabled = UserDefaults.standard.bool(forKey: "hotKeyMonitoringEnabled")
         self.isCmdQBlockerEnabled = UserDefaults.standard.bool(forKey: "qblocker_enabled")
         self.isCmdWBlockerEnabled = UserDefaults.standard.bool(forKey: "wblocker_enabled")
+        self.isAccessibilityGranted = false // Начинаем с false, таймер исправит
 
         // Устанавливаем связи
         windowManager.setCoordinator(self)
         
-        // Настраиваем реактивные связи
         setupBindings()
         setupConnections()
     }
     
     private func setupBindings() {
-        // Синхронизируем состояние UI с поведением менеджеров
-        
-        // 1. Text Conversion
-        $isTextConversionEnabled
-            .dropFirst() // Пропускаем начальное значение
-            .sink { [weak self] enabled in
-                guard let self = self else { return }
-                self.hotKeyManager.isEnabled = enabled
-                self.hotKeyManager.saveEnabledState() // Сохраняем состояние
-                if enabled {
-                    self.hotKeyManager.startMonitoring()
-                } else {
-                    self.hotKeyManager.stopMonitoring()
-                }
-            }
-            .store(in: &cancellables)
+        // Эта логика связывает действия пользователя в UI с поведением менеджеров
+        $isTextConversionEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self = self else { return }
+            self.hotKeyManager.isEnabled = enabled
+            self.hotKeyManager.saveEnabledState()
+            self.updateServicesBasedOnPermissions()
+        }.store(in: &cancellables)
             
-        // 2. Auto Launch
-        $isAutoLaunchEnabled
-            .dropFirst()
-            .sink { [weak self] enabled in
-                if enabled {
-                    self?.autoLaunchManager.enableAutoLaunch()
-                } else {
-                    self?.autoLaunchManager.disableAutoLaunch()
-                }
-            }
-            .store(in: &cancellables)
+        $isAutoLaunchEnabled.dropFirst().sink { [weak self] enabled in
+            enabled ? self?.autoLaunchManager.enableAutoLaunch() : self?.autoLaunchManager.disableAutoLaunch()
+        }.store(in: &cancellables)
             
-        // 3. Cmd+Q Blocker
-        $isCmdQBlockerEnabled
-            .dropFirst()
-            .sink { [weak self] enabled in
-                self?.hotkeyBlockerManager.isCmdQEnabled = enabled
-                self?.hotkeyBlockerManager.updateMonitoringState()
-            }
-            .store(in: &cancellables)
+        $isCmdQBlockerEnabled.dropFirst().sink { [weak self] enabled in
+            self?.hotkeyBlockerManager.isCmdQEnabled = enabled
+            self?.hotkeyBlockerManager.updateMonitoringState()
+        }.store(in: &cancellables)
             
-        // 4. Cmd+W Blocker
-        $isCmdWBlockerEnabled
-            .dropFirst()
-            .sink { [weak self] enabled in
-                self?.hotkeyBlockerManager.isCmdWEnabled = enabled
-                self?.hotkeyBlockerManager.updateMonitoringState()
-            }
-            .store(in: &cancellables)
+        $isCmdWBlockerEnabled.dropFirst().sink { [weak self] enabled in
+            self?.hotkeyBlockerManager.isCmdWEnabled = enabled
+            self?.hotkeyBlockerManager.updateMonitoringState()
+        }.store(in: &cancellables)
     }
     
-    // MARK: - Setup
     private func setupConnections() {
-        // Слушаем нажатие горячей клавиши
-        NotificationCenter.default.addObserver(
-            forName: .hotKeyPressed,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleHotKeyPressed()
-        }
+        // Слушаем уведомление от AccessibilityManager
+        NotificationCenter.default.publisher(for: .accessibilityStatusChanged)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateUIState() // Принудительно обновляем все состояние
+            }
+            .store(in: &cancellables)
         
-        // Слушаем предоставление прав доступа
-        NotificationCenter.default.addObserver(
-            forName: .accessibilityGranted,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleAccessibilityGranted()
-        }
+        // Слушаем нажатие горячей клавиши
+        NotificationCenter.default.publisher(for: .hotKeyPressed)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.handleHotKeyPressed()
+            }
+            .store(in: &cancellables)
     }
     
-    // MARK: - App Lifecycle
     func start() {
         print("🚀 Приложение запущено")
+        textTransformer.loadProfiles()
         
-        // Мы больше не проверяем права немедленно.
-        // Вместо этого мы откладываем всю логику запуска.
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-            
-            print("✅ Запускаем основные сервисы после задержки...")
-            
-            // Теперь, спустя полсекунды, проверка прав будет корректной.
-            if !self.accessibilityManager.isAccessibilityGranted() {
-                #if !DEBUG
-                self.accessibilityManager.requestAccessibilityPermissions()
-                #else
-                // В режиме разработки просто устанавливаем статус как granted
-                self.accessibilityManager.accessibilityStatus = .granted
-                print("🔧 Режим разработки: права доступа установлены автоматически")
-                #endif
-            }
-            
-            // Активируем функции, которые были включены
-            if self.accessibilityManager.isAccessibilityGranted() {
-                if self.isTextConversionEnabled {
-                    self.hotKeyManager.startMonitoring()
-                }
-                if self.isCmdQBlockerEnabled || self.isCmdWBlockerEnabled {
-                    self.startHotkeyBlocker()
-                }
-            }
-            
-            // Синхронизируем состояние HotkeyBlocker
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.hotkeyBlockerManager.syncState()
-            }
+        // Запускаем таймер, который будет поддерживать UI в актуальном состоянии
+        uiUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateUIState()
         }
         
-        // Загрузку профилей можно оставить здесь, она не зависит от прав
-        textTransformer.loadSymbols()
+        // Первый запуск с задержкой, чтобы избежать "гонки состояний"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.updateUIState()
+            // Запрашиваем права, только если их точно нет
+            if !self.isAccessibilityGranted {
+                self.accessibilityManager.requestPermissions()
+            }
+        }
+    }
+    
+    // --- ЦЕНТРАЛЬНЫЙ МЕТОД ОБНОВЛЕНИЯ UI ---
+    @objc private func updateUIState() {
+        let actualGranted = accessibilityManager.isAccessibilityGranted()
+        if self.isAccessibilityGranted != actualGranted {
+            self.isAccessibilityGranted = actualGranted
+        }
+        
+        // Обновляем сервисы, если статус прав изменился
+        updateServicesBasedOnPermissions()
+    }
+    
+    // Включает/выключает сервисы в зависимости от прав и настроек
+    private func updateServicesBasedOnPermissions() {
+        if isAccessibilityGranted {
+            if isTextConversionEnabled && !hotKeyManager.isEnabled {
+                hotKeyManager.startMonitoring()
+            }
+            if (isCmdQBlockerEnabled || isCmdWBlockerEnabled) && !hotkeyBlockerManager.isMonitoring {
+                startHotkeyBlocker()
+            }
+        } else {
+            // Если прав нет, принудительно все выключаем
+            if hotKeyManager.isEnabled {
+                hotKeyManager.stopMonitoring()
+            }
+            if hotkeyBlockerManager.isMonitoring {
+                hotkeyBlockerManager.stop()
+            }
+        }
     }
     
     private func startHotkeyBlocker() {
@@ -222,6 +202,8 @@ class AppCoordinator: ObservableObject {
     }
     
     func stop() {
+        uiUpdateTimer?.invalidate()
+        uiUpdateTimer = nil
         hotKeyManager.stopMonitoring()
         hotkeyBlockerManager.stop()
         print("⏹️ Приложение остановлено")
@@ -230,7 +212,7 @@ class AppCoordinator: ObservableObject {
     // MARK: - Event Handling
     private func handleHotKeyPressed() {
         // Проверяем права доступа
-        guard accessibilityManager.isAccessibilityGranted() else {
+        guard isAccessibilityGranted else {
             notificationManager.showAlert(
                 title: "Требуются разрешения",
                 message: "Для работы приложения необходимо предоставить разрешения на доступность в настройках системы.",
@@ -246,12 +228,15 @@ class AppCoordinator: ObservableObject {
         textProcessingManager.processSelectedText()
     }
     
-    private func handleAccessibilityGranted() {
-        print("🔄 Права доступа предоставлены, запускаем мониторинг...")
+    func handleAccessibilityGranted() {
+        print("🔄 Права доступа есть. Запускаем сервисы...")
+        
         if isTextConversionEnabled {
             hotKeyManager.startMonitoring()
         }
         if isCmdQBlockerEnabled || isCmdWBlockerEnabled {
+            hotkeyBlockerManager.isCmdQEnabled = isCmdQBlockerEnabled
+            hotkeyBlockerManager.isCmdWEnabled = isCmdWBlockerEnabled
             startHotkeyBlocker()
         }
     }
