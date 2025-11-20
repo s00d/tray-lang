@@ -126,15 +126,9 @@ struct RuleRowView: View {
     
     var body: some View {
         HStack {
-            if let icon = rule.appIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 32, height: 32)
-            } else {
-                Image(systemName: "app.dashed")
-                    .font(.system(size: 24))
-                    .frame(width: 32, height: 32)
-            }
+            Image(nsImage: rule.appIcon)
+                .resizable()
+                .frame(width: 32, height: 32)
             
             VStack(alignment: .leading) {
                 Text(rule.appName).fontWeight(.semibold)
@@ -175,15 +169,9 @@ struct RememberedLayoutRowView: View {
     
     var body: some View {
         HStack {
-            if let icon = remembered.appIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 32, height: 32)
-            } else {
-                Image(systemName: "app.dashed")
-                    .font(.system(size: 24))
-                    .frame(width: 32, height: 32)
-            }
+            Image(nsImage: remembered.appIcon)
+                .resizable()
+                .frame(width: 32, height: 32)
             
             VStack(alignment: .leading) {
                 Text(remembered.appName)

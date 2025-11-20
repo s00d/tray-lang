@@ -12,6 +12,10 @@ class HotKeyManager: ObservableObject {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     
+    // Отдельный поток для мониторинга клавиатуры
+    private var monitoringThread: Thread?
+    private var monitoringRunLoop: CFRunLoop?
+    
     init() {
         // 2. УБИРАЕМ загрузку isEnabled из init.
         loadHotKey()
@@ -33,7 +37,7 @@ class HotKeyManager: ObservableObject {
                 let decoder = JSONDecoder()
                 hotKey = try decoder.decode(HotKey.self, from: savedHotKey)
             } catch {
-                print("❌ Ошибка загрузки горячей клавиши: \(error)")
+                debugLog("❌ Ошибка загрузки горячей клавиши: \(error)")
             }
         }
     }
@@ -44,7 +48,7 @@ class HotKeyManager: ObservableObject {
             let data = try encoder.encode(hotKey)
             UserDefaults.standard.set(data, forKey: "savedHotKey")
         } catch {
-            print("❌ Ошибка сохранения горячей клавиши: \(error)")
+                debugLog("❌ Ошибка сохранения горячей клавиши: \(error)")
         }
     }
     
@@ -69,56 +73,84 @@ class HotKeyManager: ObservableObject {
             startMonitoring()
         }
         
-        print("🔄 Хоткей обновлен: \(newHotKey.displayString)")
+        debugLog("🔄 Хоткей обновлен: \(newHotKey.displayString)")
     }
     
     // MARK: - Monitoring
     func startMonitoring() {
         guard !isEnabled else { return }
         
-        let eventMask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        
-        eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-                guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
-                let manager = Unmanaged<HotKeyManager>.fromOpaque(refcon).takeUnretainedValue()
-                return manager.handleKeyEvent(proxy: proxy, type: type, event: event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        )
-        
-        guard let eventTap = eventTap else {
-            print("❌ Не удалось создать event tap")
-            return
+        // Создаем поток для мониторинга
+        monitoringThread = Thread { [weak self] in
+            guard let self = self else { return }
+            
+            let eventMask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+            
+            self.eventTap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: eventMask,
+                callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
+                    guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
+                    let manager = Unmanaged<HotKeyManager>.fromOpaque(refcon).takeUnretainedValue()
+                    return manager.handleKeyEvent(proxy: proxy, type: type, event: event)
+                },
+                userInfo: Unmanaged.passUnretained(self).toOpaque()
+            )
+            
+            guard let eventTap = self.eventTap else {
+                debugLog("❌ Не удалось создать event tap")
+                return
+            }
+            
+            self.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+            let currentRunLoop = CFRunLoopGetCurrent()
+            self.monitoringRunLoop = currentRunLoop
+            CFRunLoopAddSource(currentRunLoop, self.runLoopSource, .commonModes)
+            CGEvent.tapEnable(tap: eventTap, enable: true)
+            
+            DispatchQueue.main.async {
+                self.isEnabled = true
+            }
+            
+            debugLog("✅ Мониторинг горячих клавиш запущен")
+            
+            // Запускаем RunLoop этого потока
+            CFRunLoopRun()
         }
         
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: eventTap, enable: true)
-        
-        isEnabled = true
-        print("✅ Мониторинг горячих клавиш запущен")
+        monitoringThread?.name = "com.traylang.hotkeyMonitor"
+        monitoringThread?.qualityOfService = .userInteractive
+        monitoringThread?.start()
     }
     
     func stopMonitoring() {
         guard isEnabled else { return }
         
+        // Останавливаем RunLoop потока
+        if let runLoop = monitoringRunLoop {
+            CFRunLoopStop(runLoop)
+        }
+        
         if let eventTap = eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
         }
         
-        if let runLoopSource = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        if let runLoopSource = runLoopSource, let runLoop = monitoringRunLoop {
+            CFRunLoopRemoveSource(runLoop, runLoopSource, .commonModes)
         }
         
         eventTap = nil
         runLoopSource = nil
+        monitoringRunLoop = nil
+        
+        // Отменяем поток
+        monitoringThread?.cancel()
+        monitoringThread = nil
+        
         isEnabled = false
-        print("⏹️ Мониторинг горячих клавиш остановлен")
+        debugLog("⏹️ Мониторинг горячих клавиш остановлен")
     }
     
     // MARK: - Event Handling
@@ -130,7 +162,7 @@ class HotKeyManager: ObservableObject {
         
         // Проверяем, соответствует ли событие нашей горячей клавише
         if keyCode == hotKey.keyCode && flags.contains(hotKey.modifiers.first ?? []) {
-            print("🎯 Горячая клавиша сработала!")
+            debugLog("🎯 Горячая клавиша сработала!")
             NotificationCenter.default.post(name: .hotKeyPressed, object: nil)
             return nil // Поглощаем событие
         }

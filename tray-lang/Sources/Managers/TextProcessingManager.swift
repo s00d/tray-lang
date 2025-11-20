@@ -20,39 +20,52 @@ class TextProcessingManager: ObservableObject {
     }
     
     // MARK: - Pre-check
-    // ИЗМЕНЕННАЯ функция проверки
+    // Функция для безопасного получения атрибута с таймаутом
+    private func getAXAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        var result: CFTypeRef?
+        
+        // Устанавливаем короткий таймаут (0.1 сек) для предотвращения зависаний
+        AXUIElementSetMessagingTimeout(element, 0.1)
+        
+        let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
+        
+        if error == .success {
+            return result
+        }
+        return nil
+    }
+    
+    // ИЗМЕНЕННАЯ функция проверки с таймаутами
     private func checkSelectionStatus() -> SelectionStatus {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            print("🔍 checkSelectionStatus: Не удалось получить активное приложение.")
+            debugLog("🔍 checkSelectionStatus: Не удалось получить активное приложение.")
             return .unknown
         }
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
         
-        var focusedElement: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success,
-              let element = focusedElement else {
-            print("🔍 checkSelectionStatus: Не удалось получить элемент в фокусе.")
+        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
+            debugLog("🔍 checkSelectionStatus: Не удалось получить элемент в фокусе.")
             return .unknown
         }
+        let focusedElement = focusedElementRef as! AXUIElement
               
-        var selectedRange: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element as! AXUIElement, kAXSelectedTextRangeAttribute as CFString, &selectedRange) == .success,
-              let rangeValue = selectedRange else {
-            print("🔍 checkSelectionStatus: Элемент не поддерживает kAXSelectedTextRangeAttribute. Статус неизвестен.")
+        guard let selectedRange = getAXAttribute(focusedElement, kAXSelectedTextRangeAttribute as String) else {
+            debugLog("🔍 checkSelectionStatus: Элемент не поддерживает kAXSelectedTextRangeAttribute. Статус неизвестен.")
             return .unknown // Ключевое изменение: если API не поддерживается, мы не знаем статус
         }
+        let rangeValue = selectedRange as! AXValue
               
         var range = CFRange()
-        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else {
-            print("🔍 checkSelectionStatus: Не удалось конвертировать диапазон.")
+        guard AXValueGetValue(rangeValue, .cfRange, &range) else {
+            debugLog("🔍 checkSelectionStatus: Не удалось конвертировать диапазон.")
             return .unknown
         }
         
         if range.length > 0 {
-            print("🔍 checkSelectionStatus: Текст выделен (длина: \(range.length)).")
+            debugLog("🔍 checkSelectionStatus: Текст выделен (длина: \(range.length)).")
             return .selected
         } else {
-            print("🔍 checkSelectionStatus: Текст не выделен.")
+            debugLog("🔍 checkSelectionStatus: Текст не выделен.")
             return .notSelected
         }
     }
@@ -64,29 +77,29 @@ class TextProcessingManager: ObservableObject {
         
         switch status {
         case .notSelected:
-            print("🤷 Текст не выделен. Операция отменена.")
+            debugLog("🤷 Текст не выделен. Операция отменена.")
             return
             
         case .selected:
-            print("🔄 Текст выделен, запускаем полную цепочку методов...")
+            debugLog("🔄 Текст выделен, запускаем полную цепочку методов...")
             // Запускаем полную цепочку, так как приложение "отзывчивое"
             guard let selectedText = getSelectedText() else {
-                print("❌ Не удалось получить выделенный текст, хотя выделение было обнаружено.")
+                debugLog("❌ Не удалось получить выделенный текст, хотя выделение было обнаружено.")
                 return
             }
             performTransformation(with: selectedText)
             
         case .unknown:
-            print("🤔 Статус выделения неизвестен. Приложение может быть несовместимо с Accessibility API. Пробуем запасной метод...")
+            debugLog("🤔 Статус выделения неизвестен. Приложение может быть несовместимо с Accessibility API. Пробуем запасной метод...")
             // Приложение "неразговорчивое", пропускаем методы Accessibility и сразу идем к буферу обмена.
             do {
                 if let selectedText = try getSelectedTextViaHotkeys() {
                     performTransformation(with: selectedText)
                 } else {
-                    print("❌ Запасной метод также не смог получить текст.")
+                    debugLog("❌ Запасной метод также не смог получить текст.")
                 }
             } catch {
-                print("❌ Ошибка при выполнении запасного метода: \(error)")
+                debugLog("❌ Ошибка при выполнении запасного метода: \(error)")
             }
         }
     }
@@ -94,119 +107,107 @@ class TextProcessingManager: ObservableObject {
     // Вспомогательная функция, чтобы не дублировать код
     private func performTransformation(with text: String) {
         let transformedText = textTransformer.transformText(text)
-        print("🔄 Трансформированный текст: \(transformedText)")
+        debugLog("🔄 Трансформированный текст: \(transformedText)")
         
         if replaceSelectedText(with: transformedText) {
-            print("✅ Текст успешно заменен, переключаем язык")
+            debugLog("✅ Текст успешно заменен, переключаем язык")
             switchToNextLayout()
         } else {
-            print("❌ Не удалось заменить текст")
+            debugLog("❌ Не удалось заменить текст")
         }
     }
     
     // MARK: - Text Retrieval
     private func getSelectedText() -> String? {
-        print("🔍 === НАЧАЛО ПОЛУЧЕНИЯ ВЫДЕЛЕННОГО ТЕКСТА ===")
+        debugLog("🔍 === НАЧАЛО ПОЛУЧЕНИЯ ВЫДЕЛЕННОГО ТЕКСТА ===")
         
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            print("❌ Не удалось получить активное приложение")
+            debugLog("❌ Не удалось получить активное приложение")
             return nil
         }
         
-        print("📱 Активное приложение: \(frontmostApp.localizedName ?? "Unknown") (PID: \(frontmostApp.processIdentifier))")
+        debugLog("📱 Активное приложение: \(frontmostApp.localizedName ?? "Unknown") (PID: \(frontmostApp.processIdentifier))")
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
         
         // Метод 1: Попытка получить выделенный текст через kAXSelectedTextAttribute
-        print("🔍 Метод 1: kAXSelectedTextAttribute")
+        debugLog("🔍 Метод 1: kAXSelectedTextAttribute")
         do {
             if let text = try getSelectedTextViaAttribute(appElement) {
-                print("✅ Метод 1 УСПЕШЕН: \(text)")
+                debugLog("✅ Метод 1 УСПЕШЕН: \(text)")
                 return text
             }
         } catch {
-            print("❌ Метод 1 ПРОВАЛЕН: \(error)")
+            debugLog("❌ Метод 1 ПРОВАЛЕН: \(error)")
         }
         
         // Метод 2: Попытка получить текст через kAXValueAttribute
-        print("🔍 Метод 2: kAXValueAttribute")
+        debugLog("🔍 Метод 2: kAXValueAttribute")
         do {
             if let text = try getSelectedTextViaValue(appElement) {
-                print("✅ Метод 2 УСПЕШЕН: \(text)")
+                debugLog("✅ Метод 2 УСПЕШЕН: \(text)")
                 return text
             }
         } catch {
-            print("❌ Метод 2 ПРОВАЛЕН: \(error)")
+            debugLog("❌ Метод 2 ПРОВАЛЕН: \(error)")
         }
         
         // Метод 3: Попытка получить текст через AppleScript и горячие клавиши
-        print("🔍 Метод 3: AppleScript + Hotkeys")
+        debugLog("🔍 Метод 3: AppleScript + Hotkeys")
         do {
             if let text = try getSelectedTextViaHotkeys() {
-                print("✅ Метод 3 УСПЕШЕН: \(text)")
+                debugLog("✅ Метод 3 УСПЕШЕН: \(text)")
                 return text
             }
         } catch {
-            print("❌ Метод 3 ПРОВАЛЕН: \(error)")
+            debugLog("❌ Метод 3 ПРОВАЛЕН: \(error)")
         }
         
-        print("❌ === ВСЕ МЕТОДЫ ПОЛУЧЕНИЯ ТЕКСТА ПРОВАЛЕНЫ ===")
+        debugLog("❌ === ВСЕ МЕТОДЫ ПОЛУЧЕНИЯ ТЕКСТА ПРОВАЛЕНЫ ===")
         return nil
     }
     
     private func getSelectedTextViaAttribute(_ appElement: AXUIElement) throws -> String? {
-        print("  🔍 Попытка получить фокусный элемент...")
-        var focusedElement: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+        debugLog("  🔍 Попытка получить фокусный элемент...")
         
-        guard result == .success, let focusedElement = focusedElement else {
-            print("  ❌ Не удалось получить фокусный элемент (результат: \(result))")
+        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
+            debugLog("  ❌ Не удалось получить фокусный элемент")
             throw TrayLangError.textRetrievalFailed
         }
+        let focusedElement = focusedElementRef as! AXUIElement
         
-        print("  ✅ Фокусный элемент получен")
-        var selectedText: CFTypeRef?
-        let textResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedText)
+        debugLog("  ✅ Фокусный элемент получен")
         
-        print("  📋 Результат получения kAXSelectedTextAttribute: \(textResult)")
-        
-        if textResult == .success, let text = selectedText as? String, !text.isEmpty {
-            print("  ✅ Текст получен через kAXSelectedTextAttribute: '\(text)'")
-            return text
-        } else {
-            print("  ❌ Текст не получен (результат: \(textResult), текст: \(selectedText != nil ? "present" : "nil"))")
-        }
-        
-        return nil
-    }
-    
-    private func getSelectedTextViaValue(_ appElement: AXUIElement) throws -> String? {
-        print("  🔍 Попытка получить фокусный элемент для Value...")
-        var focusedElement: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
-        
-        guard result == .success, let focusedElement = focusedElement else {
-            print("  ❌ Не удалось получить фокусный элемент для Value")
+        guard let selectedText = getAXAttribute(focusedElement, kAXSelectedTextAttribute as String) as? String, !selectedText.isEmpty else {
+            debugLog("  ❌ Текст не получен")
             return nil
         }
         
-        print("  ✅ Фокусный элемент получен для Value")
-        var value: CFTypeRef?
-        let valueResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &value)
+        debugLog("  ✅ Текст получен через kAXSelectedTextAttribute: '\(selectedText)'")
+        return selectedText
+    }
+    
+    private func getSelectedTextViaValue(_ appElement: AXUIElement) throws -> String? {
+        debugLog("  🔍 Попытка получить фокусный элемент для Value...")
         
-        print("  📋 Результат получения kAXValueAttribute: \(valueResult)")
+        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
+            debugLog("  ❌ Не удалось получить фокусный элемент для Value")
+            return nil
+        }
+        let focusedElement = focusedElementRef as! AXUIElement
         
-        if valueResult == .success, let text = value as? String, !text.isEmpty {
-            print("  ✅ Текст получен через kAXValueAttribute: '\(text)'")
-            return text
-        } else {
-            print("  ❌ Текст не получен через Value (результат: \(valueResult), значение: \(value != nil ? "present" : "nil"))")
+        debugLog("  ✅ Фокусный элемент получен для Value")
+        
+        guard let text = getAXAttribute(focusedElement, kAXValueAttribute as String) as? String, !text.isEmpty else {
+            debugLog("  ❌ Текст не получен через Value")
+            return nil
         }
         
-        return nil
+        debugLog("  ✅ Текст получен через kAXValueAttribute: '\(text)'")
+        return text
     }
     
     private func getSelectedTextViaHotkeys() throws -> String? {
-        print("  🔍 Выполняем копирование через CGEvent и NSPasteboard...")
+        debugLog("  🔍 Выполняем копирование через CGEvent и NSPasteboard...")
         
         return getSelectedTextViaPasteboard()
     }
@@ -222,13 +223,13 @@ class TextProcessingManager: ObservableObject {
             originalContent = originalString
         }
         
-        print("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
+        debugLog("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
         
         // 2. Симулируем Cmd+C
         let source = CGEventSource(stateID: .hidSystemState)
         guard let cmdCDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true),
               let cmdCUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false) else {
-            print("  ❌ Не удалось создать события клавиатуры")
+            debugLog("  ❌ Не удалось создать события клавиатуры")
             return nil
         }
         
@@ -238,33 +239,23 @@ class TextProcessingManager: ObservableObject {
         cmdCDown.post(tap: .cghidEventTap)
         cmdCUp.post(tap: .cghidEventTap)
         
-        print("  ⌨️ Отправлено событие Cmd+C")
+        debugLog("  ⌨️ Отправлено событие Cmd+C")
         
-        // 3. Ждем изменения буфера обмена (до 0.5 секунды)
-        let startTime = Date()
-        let timeout: TimeInterval = 0.5
-        var newChangeCount = pasteboard.changeCount
-        
-        while newChangeCount == originalChangeCount && Date().timeIntervalSince(startTime) < timeout {
-            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
-            newChangeCount = pasteboard.changeCount
-        }
-        
-        // 4. Проверяем, изменился ли буфер обмена
-        guard newChangeCount != originalChangeCount else {
-            print("  ❌ Буфер обмена не изменился в течение таймаута")
+        // 3. Ждем изменения буфера обмена с оптимизированным ожиданием
+        guard PasteboardHelper.waitForPasteboardChange(originalCount: originalChangeCount, timeout: 0.3) else {
+            debugLog("  ❌ Буфер обмена не изменился в течение таймаута")
             restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
             return nil
         }
         
         // 5. Читаем новый текст
         guard let newText = pasteboard.string(forType: .string), !newText.isEmpty else {
-            print("  ❌ Не удалось прочитать текст из буфера обмена")
+            debugLog("  ❌ Не удалось прочитать текст из буфера обмена")
             restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
             return nil
         }
         
-        print("  ✅ Текст получен через NSPasteboard: '\(newText)' (changeCount: \(newChangeCount))")
+        debugLog("  ✅ Текст получен через NSPasteboard: '\(newText)'")
         
         // 6. Восстанавливаем оригинальный буфер обмена
         restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
@@ -279,45 +270,45 @@ class TextProcessingManager: ObservableObject {
         if let original = originalContent {
             pasteboard.clearContents()
             pasteboard.setString(original, forType: .string)
-            print("  🔄 Буфер обмена восстановлен")
+            debugLog("  🔄 Буфер обмена восстановлен")
         } else {
             // Если оригинального содержимого не было, просто очищаем
             if pasteboard.changeCount != originalChangeCount {
                 pasteboard.clearContents()
-                print("  🔄 Буфер обмена очищен")
+                debugLog("  🔄 Буфер обмена очищен")
             }
         }
     }
     
     // MARK: - Text Replacement
     private func replaceSelectedText(with newText: String) -> Bool {
-        print("📝 === НАЧАЛО ЗАМЕНЫ ТЕКСТА: '\(newText)' ===")
+        debugLog("📝 === НАЧАЛО ЗАМЕНЫ ТЕКСТА: '\(newText)' ===")
         
         // Метод 1: Попытка заменить через Accessibility API (резервный)
-        print("🔍 Метод 1: Accessibility API")
+        debugLog("🔍 Метод 1: Accessibility API")
         if replaceTextViaAccessibility(newText) {
-            print("✅ Метод 1 ЗАМЕНЫ УСПЕШЕН")
+            debugLog("✅ Метод 1 ЗАМЕНЫ УСПЕШЕН")
             return true
         }
         
         // Метод 2: Попытка заменить через улучшенную логику (наиболее надежный)
-        print("🔍 Метод 2: Улучшенная логика с AppleScript")
+        debugLog("🔍 Метод 2: Улучшенная логика с AppleScript")
         if replaceTextWithImprovedLogic(newText) {
-            print("✅ Метод 2 ЗАМЕНЫ УСПЕШЕН")
+            debugLog("✅ Метод 2 ЗАМЕНЫ УСПЕШЕН")
             return true
         }
         
-        print("❌ === ВСЕ МЕТОДЫ ЗАМЕНЫ ТЕКСТА ПРОВАЛЕНЫ ===")
+        debugLog("❌ === ВСЕ МЕТОДЫ ЗАМЕНЫ ТЕКСТА ПРОВАЛЕНЫ ===")
         return false
     }
     
     private func switchToNextLayout() {
-        print("🔄 Переключаем на следующую раскладку клавиатуры...")
+        debugLog("🔄 Переключаем на следующую раскладку клавиатуры...")
         keyboardLayoutManager.switchToNextLayout()
     }
     
     private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
-        print("  🔍 Выполняем замену текста через CGEvent и NSPasteboard...")
+        debugLog("  🔍 Выполняем замену текста через CGEvent и NSPasteboard...")
         
         return replaceTextViaPasteboard(newText)
     }
@@ -332,37 +323,34 @@ class TextProcessingManager: ObservableObject {
             originalContent = originalString
         }
         
-        print("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
+        debugLog("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
         
         // 2. Помещаем новый текст в буфер обмена
         pasteboard.clearContents()
         pasteboard.setString(newText, forType: .string)
         
-        // 3. Ждем, пока буфер обмена обновится (проверяем changeCount)
-        let startTime = Date()
-        let timeout: TimeInterval = 0.5
-        var newChangeCount = pasteboard.changeCount
-        
-        while newChangeCount == originalChangeCount && Date().timeIntervalSince(startTime) < timeout {
-            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
-            newChangeCount = pasteboard.changeCount
+        // 3. Ждем, пока буфер обмена обновится с оптимизированным ожиданием
+        guard PasteboardHelper.waitForPasteboardChange(originalCount: originalChangeCount, timeout: 0.3) else {
+            debugLog("  ❌ Буфер обмена не обновился в течение таймаута")
+            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
+            return false
         }
         
         // 4. Проверяем, что текст действительно установлен
         guard let pasteboardText = pasteboard.string(forType: .string),
               pasteboardText == newText else {
-            print("  ❌ Не удалось установить текст в буфер обмена")
+            debugLog("  ❌ Не удалось установить текст в буфер обмена")
             restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
             return false
         }
         
-        print("  📋 Текст установлен в буфер обмена (changeCount: \(newChangeCount))")
+        debugLog("  📋 Текст установлен в буфер обмена")
         
         // 5. Симулируем Cmd+V для вставки
         let source = CGEventSource(stateID: .hidSystemState)
         guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
               let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
-            print("  ❌ Не удалось создать события клавиатуры")
+            debugLog("  ❌ Не удалось создать события клавиатуры")
             restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
             return false
         }
@@ -373,7 +361,7 @@ class TextProcessingManager: ObservableObject {
         cmdVDown.post(tap: .cghidEventTap)
         cmdVUp.post(tap: .cghidEventTap)
         
-        print("  ⌨️ Отправлено событие Cmd+V")
+        debugLog("  ⌨️ Отправлено событие Cmd+V")
         
         // 6. Небольшая задержка после вставки
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
@@ -381,85 +369,71 @@ class TextProcessingManager: ObservableObject {
         // 7. Восстанавливаем оригинальный буфер обмена
         restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
         
-        print("  ✅ Замена текста выполнена успешно")
+        debugLog("  ✅ Замена текста выполнена успешно")
         return true
     }
     
     private func replaceTextViaAccessibility(_ newText: String) -> Bool {
-        print("  🔍 Попытка замены через Accessibility API...")
+        debugLog("  🔍 Попытка замены через Accessibility API...")
         
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            print("  ❌ Не удалось получить активное приложение")
+            debugLog("  ❌ Не удалось получить активное приложение")
             return false
         }
         
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
         
-        // Получаем фокусный элемент
-        var focusedElement: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+        // Получаем фокусный элемент с таймаутом
+        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
+            debugLog("  ❌ Не удалось получить фокусный элемент")
+            return false
+        }
+        let focusedElement = focusedElementRef as! AXUIElement
         
-        guard result == .success, let focusedElement = focusedElement else {
-            print("  ❌ Не удалось получить фокусный элемент (результат: \(result))")
+        debugLog("  ✅ Фокусный элемент получен")
+        
+        // Пытаемся получить текущий текст для проверки
+        guard let currentText = getAXAttribute(focusedElement, kAXValueAttribute as String) as? String else {
+            debugLog("  ❌ Не удалось получить текущий текст")
             return false
         }
         
-        print("  ✅ Фокусный элемент получен")
+        debugLog("  📋 Текущий текст элемента: '\(currentText)'")
         
-        // Пытаемся получить текущий текст для проверки
-        var currentText: CFTypeRef?
-        let getResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &currentText)
+        // Пытаемся получить выделенный текст
+        guard let selectedText = getAXAttribute(focusedElement, kAXSelectedTextAttribute as String) as? String, !selectedText.isEmpty else {
+            debugLog("  ❌ Выделенный текст не найден или пуст")
+            return false
+        }
         
-        print("  📋 Результат получения текущего текста: \(getResult)")
+        debugLog("  📋 Выделенный текст: '\(selectedText)'")
         
-        if getResult == .success, let text = currentText as? String {
-            print("  📋 Текущий текст элемента: '\(text)'")
+        // Заменяем выделенный текст на новый
+        AXUIElementSetMessagingTimeout(focusedElement, 0.1)
+        let setResult = AXUIElementSetAttributeValue(focusedElement, kAXSelectedTextAttribute as CFString, newText as CFString)
+        
+        debugLog("  📋 Результат установки нового текста: \(setResult)")
+        
+        // Проверяем, что замена действительно произошла
+        if setResult == .success {
+            // Проверяем результат замены
+            guard let newCurrentText = getAXAttribute(focusedElement, kAXValueAttribute as String) as? String else {
+                debugLog("  ❌ Не удалось проверить результат замены")
+                return false
+            }
             
-            // Пытаемся получить выделенный текст
-            var selectedText: CFTypeRef?
-            let selectedResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedText)
+            debugLog("  📋 Текст после замены: '\(newCurrentText)'")
             
-            print("  📋 Результат получения выделенного текста: \(selectedResult)")
-            
-            if selectedResult == .success, let selected = selectedText as? String, !selected.isEmpty {
-                print("  📋 Выделенный текст: '\(selected)'")
-                
-                // Заменяем выделенный текст на новый
-                let setResult = AXUIElementSetAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, newText as CFString)
-                
-                print("  📋 Результат установки нового текста: \(setResult)")
-                
-                // Проверяем, что замена действительно произошла
-                if setResult == .success {
-                    // Проверяем результат замены
-                    var newCurrentText: CFTypeRef?
-                    let verifyResult = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXValueAttribute as CFString, &newCurrentText)
-                    
-                    if verifyResult == .success, let newText = newCurrentText as? String {
-                        print("  📋 Текст после замены: '\(newText)'")
-                        
-                        // Проверяем, что текст действительно изменился
-                        if newText != text {
-                            print("  ✅ Выделенный текст успешно заменен через Accessibility API")
-                            return true
-                        } else {
-                            print("  ❌ Текст не изменился после попытки замены")
-                            return false
-                        }
-                    } else {
-                        print("  ❌ Не удалось проверить результат замены (результат: \(verifyResult))")
-                        return false
-                    }
-                } else {
-                    print("  ❌ Не удалось установить новый текст (результат: \(setResult))")
-                    return false
-                }
+            // Проверяем, что текст действительно изменился
+            if newCurrentText != currentText {
+                debugLog("  ✅ Выделенный текст успешно заменен через Accessibility API")
+                return true
             } else {
-                print("  ❌ Выделенный текст не найден или пуст")
+                debugLog("  ❌ Текст не изменился после попытки замены")
                 return false
             }
         } else {
-            print("  ❌ Не удалось получить текущий текст (результат: \(getResult))")
+            debugLog("  ❌ Не удалось установить новый текст (результат: \(setResult))")
             return false
         }
     }

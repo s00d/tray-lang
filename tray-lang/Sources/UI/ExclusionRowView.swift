@@ -13,16 +13,9 @@ struct ExclusionRowView: View {
 
     var body: some View {
         HStack {
-            if let icon = app.appIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 32, height: 32)
-            } else {
-                Image(systemName: "app.dashed")
-                    .font(.system(size: 24))
-                    .frame(width: 32, height: 32)
-                    .foregroundColor(.secondary)
-            }
+            Image(nsImage: app.appIcon)
+                .resizable()
+                .frame(width: 32, height: 32)
             
             VStack(alignment: .leading) {
                 Text(app.name)

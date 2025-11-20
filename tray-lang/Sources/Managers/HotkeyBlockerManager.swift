@@ -25,6 +25,18 @@ class HotkeyBlockerManager: ObservableObject {
     private var keyDownRunLoopSource: CFRunLoopSource?
     private var keyUpRunLoopSource: CFRunLoopSource?
     
+    // Отдельный поток для мониторинга клавиатуры
+    private var monitoringThread: Thread?
+    private var monitoringRunLoop: CFRunLoop?
+    
+    // Кэш для оптимизации проверки Cmd+Q
+    private var currentAppBundleID: String?
+    private var currentAppSupportsCmdQ: Bool = true // По умолчанию true для безопасности
+    
+    // Throttling для счетчиков
+    private var internalAccidentalQuits = 0
+    private var internalAccidentalCloses = 0
+    
     private let notificationManager: NotificationManager
     private let exclusionManager: ExclusionManager
     
@@ -33,13 +45,24 @@ class HotkeyBlockerManager: ObservableObject {
         self.exclusionManager = exclusionManager
         // 2. УБИРАЕМ loadSettings() из init. AppCoordinator сам задаст начальные значения.
         // Загружаем только статистику и задержку
-        self.accidentalQuits = UserDefaults.standard.integer(forKey: "qblocker_accidental_quits")
-        self.accidentalCloses = UserDefaults.standard.integer(forKey: "wblocker_accidental_closes")
+        self.internalAccidentalQuits = UserDefaults.standard.integer(forKey: "qblocker_accidental_quits")
+        self.internalAccidentalCloses = UserDefaults.standard.integer(forKey: "wblocker_accidental_closes")
+        self.accidentalQuits = internalAccidentalQuits
+        self.accidentalCloses = internalAccidentalCloses
         let savedDelay = UserDefaults.standard.integer(forKey: "qblocker_delay")
         self.delay = savedDelay == 0 ? 1 : savedDelay
+        
+        // Подписываемся на смену приложения для кэширования проверки Cmd+Q
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(appChanged),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
     }
     
     deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         stop()
     }
     
@@ -48,8 +71,8 @@ class HotkeyBlockerManager: ObservableObject {
     func saveSettings() {
         UserDefaults.standard.set(isCmdQEnabled, forKey: "qblocker_enabled")
         UserDefaults.standard.set(isCmdWEnabled, forKey: "wblocker_enabled")
-        UserDefaults.standard.set(accidentalQuits, forKey: "qblocker_accidental_quits")
-        UserDefaults.standard.set(accidentalCloses, forKey: "wblocker_accidental_closes")
+        UserDefaults.standard.set(internalAccidentalQuits, forKey: "qblocker_accidental_quits")
+        UserDefaults.standard.set(internalAccidentalCloses, forKey: "wblocker_accidental_closes")
         UserDefaults.standard.set(delay, forKey: "qblocker_delay")
     }
     
@@ -59,33 +82,60 @@ class HotkeyBlockerManager: ObservableObject {
         
         // Проверяем, не запущен ли уже мониторинг
         if isMonitoring {
-            print("ℹ️ HotkeyBlocker monitoring is already active")
+            debugLog("ℹ️ HotkeyBlocker monitoring is already active")
             return
         }
         
-        do {
-            try startKeyMonitoring()
-            print("✅ HotkeyBlocker monitoring started")
-        } catch {
-            print("❌ Failed to start HotkeyBlocker: \(error)")
-        // Если не удалось запустить, сбрасываем состояние
-        DispatchQueue.main.async {
-            self.isCmdQEnabled = false
-            self.isCmdWEnabled = false
+        // Создаем поток для мониторинга
+        monitoringThread = Thread { [weak self] in
+            guard let self = self else { return }
+            
+            // Внутри потока создаем Event Tap
+            do {
+                try self.startKeyMonitoring()
+                
+                // Сохраняем ссылку на RunLoop
+                self.monitoringRunLoop = CFRunLoopGetCurrent()
+                
+                // Запускаем RunLoop этого потока
+                CFRunLoopRun()
+            } catch {
+                debugLog("❌ Error starting tap on thread: \(error)")
+                DispatchQueue.main.async {
+                    self.isCmdQEnabled = false
+                    self.isCmdWEnabled = false
+                }
+            }
         }
-        }
+        
+        monitoringThread?.name = "com.traylang.keyboardMonitor"
+        monitoringThread?.qualityOfService = .userInteractive
+        monitoringThread?.start()
+        
+        debugLog("✅ HotkeyBlocker monitoring thread started")
     }
     
     func startIfEnabled() throws {
         if isCmdQEnabled || isCmdWEnabled {
             try startKeyMonitoring()
-            print("✅ HotkeyBlocker monitoring started")
+            debugLog("✅ HotkeyBlocker monitoring started")
         }
     }
     
     func stop() {
+        // Останавливаем RunLoop потока
+        if let runLoop = monitoringRunLoop {
+            CFRunLoopStop(runLoop)
+        }
+        
         stopKeyMonitoring()
-        print("⏹️ HotkeyBlocker monitoring stopped")
+        
+        // Отменяем поток
+        monitoringThread?.cancel()
+        monitoringThread = nil
+        monitoringRunLoop = nil
+        
+        debugLog("⏹️ HotkeyBlocker monitoring stopped")
         
         // Сбрасываем состояние после остановки
         DispatchQueue.main.async {
@@ -96,7 +146,7 @@ class HotkeyBlockerManager: ObservableObject {
     
     func forceStop() {
         stopKeyMonitoring()
-        print("⏹️ HotkeyBlocker monitoring force stopped")
+        debugLog("⏹️ HotkeyBlocker monitoring force stopped")
         
         // Принудительно сбрасываем состояние
         DispatchQueue.main.async {
@@ -108,26 +158,26 @@ class HotkeyBlockerManager: ObservableObject {
     
     // 4. УПРОЩАЕМ updateMonitoringState. Теперь он просто слушается AppCoordinator.
     func updateMonitoringState() {
-        print("🔄 Updating monitoring state...")
-        print("  📋 Current state: Cmd+Q: \(isCmdQEnabled), Cmd+W: \(isCmdWEnabled)")
-        print("  📋 Monitoring active: \(isMonitoring)")
+        debugLog("🔄 Updating monitoring state...")
+        debugLog("  📋 Current state: Cmd+Q: \(isCmdQEnabled), Cmd+W: \(isCmdWEnabled)")
+        debugLog("  📋 Monitoring active: \(isMonitoring)")
         
         // Сохраняем настройки при изменении
         saveSettings()
         
         // Если нужно включить мониторинг и он не активен
         if (isCmdQEnabled || isCmdWEnabled) && !isMonitoring {
-            print("  🚀 Starting monitoring...")
+            debugLog("  🚀 Starting monitoring...")
             start()
         }
         // Если нужно выключить мониторинг и он активен
         else if !isCmdQEnabled && !isCmdWEnabled && isMonitoring {
-            print("  ⏹️ Stopping monitoring...")
+            debugLog("  ⏹️ Stopping monitoring...")
             stop()
         }
         // Если состояние изменилось, но мониторинг уже в нужном состоянии
         else {
-            print("  ℹ️ Monitoring state is already correct")
+            debugLog("  ℹ️ Monitoring state is already correct")
         }
     }
     
@@ -136,14 +186,14 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     func syncState() {
-        print("🔄 Syncing HotkeyBlocker state...")
-        print("  📋 isCmdQEnabled: \(isCmdQEnabled)")
-        print("  📋 isCmdWEnabled: \(isCmdWEnabled)")
-        print("  📋 isMonitoring: \(isMonitoring)")
+        debugLog("🔄 Syncing HotkeyBlocker state...")
+        debugLog("  📋 isCmdQEnabled: \(isCmdQEnabled)")
+        debugLog("  📋 isCmdWEnabled: \(isCmdWEnabled)")
+        debugLog("  📋 isMonitoring: \(isMonitoring)")
         
         // Синхронизируем состояние с фактическим мониторингом
         if !isMonitoring && (isCmdQEnabled || isCmdWEnabled) {
-            print("  ⚠️ State mismatch detected, resetting...")
+            debugLog("  ⚠️ State mismatch detected, resetting...")
             DispatchQueue.main.async {
                 self.isCmdQEnabled = false
                 self.isCmdWEnabled = false
@@ -176,33 +226,34 @@ class HotkeyBlockerManager: ObservableObject {
         
         // Check if event taps were created successfully
         guard keyDownEventTap != nil else {
-            print("❌ HotkeyBlocker: Failed to create keyDown event tap - accessibility permissions may be denied")
+            debugLog("❌ HotkeyBlocker: Failed to create keyDown event tap - accessibility permissions may be denied")
             throw QBlockerError.AccessibilityPermissionDenied
         }
         
         guard keyUpEventTap != nil else {
-            print("❌ HotkeyBlocker: Failed to create keyUp event tap - accessibility permissions may be denied")
+            debugLog("❌ HotkeyBlocker: Failed to create keyUp event tap - accessibility permissions may be denied")
             throw QBlockerError.AccessibilityPermissionDenied
         }
         
         // Create run loop sources
         keyDownRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyDownEventTap, 0)
         guard keyDownRunLoopSource != nil else {
-            print("❌ HotkeyBlocker: Failed to create keyDown run loop source")
+            debugLog("❌ HotkeyBlocker: Failed to create keyDown run loop source")
             throw QBlockerError.RunLoopSourceCreationFailed
         }
         
         keyUpRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyUpEventTap, 0)
         guard keyUpRunLoopSource != nil else {
-            print("❌ HotkeyBlocker: Failed to create keyUp run loop source")
+            debugLog("❌ HotkeyBlocker: Failed to create keyUp run loop source")
             throw QBlockerError.RunLoopSourceCreationFailed
         }
         
-        // Add sources to run loop
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), keyDownRunLoopSource, .commonModes)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), keyUpRunLoopSource, .commonModes)
+        // Add sources to run loop (будет вызвано из monitoringThread)
+        let currentRunLoop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(currentRunLoop, keyDownRunLoopSource, .commonModes)
+        CFRunLoopAddSource(currentRunLoop, keyUpRunLoopSource, .commonModes)
         
-        print("✅ HotkeyBlocker: Event taps created and added to run loop successfully")
+        debugLog("✅ HotkeyBlocker: Event taps created and added to run loop successfully")
     }
     
     private func stopKeyMonitoring() {
@@ -214,12 +265,12 @@ class HotkeyBlockerManager: ObservableObject {
             CGEvent.tapEnable(tap: keyUpEventTap, enable: false)
         }
         
-        if let keyDownRunLoopSource = keyDownRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), keyDownRunLoopSource, .commonModes)
+        if let keyDownRunLoopSource = keyDownRunLoopSource, let runLoop = monitoringRunLoop {
+            CFRunLoopRemoveSource(runLoop, keyDownRunLoopSource, .commonModes)
         }
         
-        if let keyUpRunLoopSource = keyUpRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), keyUpRunLoopSource, .commonModes)
+        if let keyUpRunLoopSource = keyUpRunLoopSource, let runLoop = monitoringRunLoop {
+            CFRunLoopRemoveSource(runLoop, keyUpRunLoopSource, .commonModes)
         }
         
         keyDownEventTap = nil
@@ -233,22 +284,22 @@ class HotkeyBlockerManager: ObservableObject {
         let flags = event.flags
         let keyCode = getKeyCode(from: event)
         
-        print("🔍 HotkeyBlocker: KeyDown event received")
-        print("  📋 Flags: \(flags)")
-        print("  📋 Cmd: \(flags.contains(.maskCommand))")
-        print("  📋 Shift: \(flags.contains(.maskShift))")
-        print("  📋 Control: \(flags.contains(.maskControl))")
-        print("  📋 KeyCode: \(keyCode)")
+        debugLog("🔍 HotkeyBlocker: KeyDown event received")
+        debugLog("  📋 Flags: \(flags)")
+        debugLog("  📋 Cmd: \(flags.contains(.maskCommand))")
+        debugLog("  📋 Shift: \(flags.contains(.maskShift))")
+        debugLog("  📋 Control: \(flags.contains(.maskControl))")
+        debugLog("  📋 KeyCode: \(keyCode)")
         
         // Check if Cmd key was pressed
         guard flags.contains(.maskCommand) else {
-            print("  ❌ No Cmd key, passing through")
+            debugLog("  ❌ No Cmd key, passing through")
             return Unmanaged.passUnretained(event)
         }
         
         // Ignore if Shift or Control is also pressed
         guard !flags.contains(.maskShift) && !flags.contains(.maskControl) else {
-            print("  ❌ Shift or Control pressed, passing through")
+            debugLog("  ❌ Shift or Control pressed, passing through")
             return Unmanaged.passUnretained(event)
         }
         
@@ -262,44 +313,61 @@ class HotkeyBlockerManager: ObservableObject {
             return handleCmdWDown(event)
         }
         
-        print("  ❌ Not Q or W key, passing through")
+        debugLog("  ❌ Not Q or W key, passing through")
         return Unmanaged.passUnretained(event)
     }
     
+    // Обработчик смены приложения (работает в фоне)
+    @objc private func appChanged(_ note: Notification) {
+        guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleID = app.bundleIdentifier else { return }
+        
+        self.currentAppBundleID = bundleID
+        
+        // Сбрасываем счетчики
+        cmdQTries = 0
+        cmdWTries = 0
+        
+        // АСИНХРОННАЯ проверка (не блокирует UI)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let hasQuit = self.checkIfAppHasQuitMenuItem(app)
+            DispatchQueue.main.async {
+                self.currentAppSupportsCmdQ = hasQuit
+                debugLog("  📋 Cached Cmd+Q support for \(bundleID): \(hasQuit)")
+            }
+        }
+    }
+    
+    // Переименовываем старый метод для использования в фоне
+    private func checkIfAppHasQuitMenuItem(_ app: NSRunningApplication) -> Bool {
+        return isCmdQActive(for: app)
+    }
+    
     private func handleCmdQDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        print("  ✅ Cmd+Q detected!")
+        debugLog("  ✅ Cmd+Q detected!")
         
-        // Check if current app is excluded from protection
-        if exclusionManager.isCurrentAppExcluded() {
-            print("  ⚠️ Current app is excluded from protection")
+        // Быстрая проверка исключений по строке (без API вызовов)
+        if let bundleID = currentAppBundleID, exclusionManager.isAppExcluded(bundleID: bundleID) {
+            debugLog("  ⚠️ Current app is excluded from protection")
             return Unmanaged.passUnretained(event)
         }
         
-        // Check if current app supports Cmd+Q
-        guard let currentApp = NSWorkspace.shared.menuBarOwningApplication else {
-            print("  ❌ No current app found")
-            return Unmanaged.passUnretained(event)
-        }
-        
-        print("  📱 Current app: \(currentApp.localizedName ?? "Unknown")")
-        
-        let cmdQActive = isCmdQActive(for: currentApp)
-        print("  📋 Cmd+Q active for app: \(cmdQActive)")
-        
-        guard cmdQActive else {
-            print("  ❌ Cmd+Q not active for this app, passing through")
+        // Читаем кэшированное значение (мгновенно)
+        if !currentAppSupportsCmdQ {
+            debugLog("  ❌ Cmd+Q not active for this app (cached), passing through")
             return Unmanaged.passUnretained(event)
         }
         
         // Check canQuit first
         guard canQuit else {
-            print("  ❌ Not allowed to quit yet")
+            debugLog("  ❌ Not allowed to quit yet")
             return nil
         }
         
         // Show HUD if we're within delay
         if cmdQTries <= delay {
-            print("  📱 Showing HUD")
+            debugLog("  📱 Showing HUD")
             showHUD(delayTime: TimeInterval(delay), hotkey: "Cmd+Q")
         } else {
             // Hide HUD if we're past the delay
@@ -307,10 +375,10 @@ class HotkeyBlockerManager: ObservableObject {
         }
         
         cmdQTries += 1
-        print("🔢 HotkeyBlocker: cmdQTries = \(cmdQTries), delay = \(delay)")
+        debugLog("🔢 HotkeyBlocker: cmdQTries = \(cmdQTries), delay = \(delay)")
         
         if cmdQTries > delay {
-            print("🔓 HotkeyBlocker: Quit allowed after holding for \(delay) seconds")
+            debugLog("🔓 HotkeyBlocker: Quit allowed after holding for \(delay) seconds")
             cmdQTries = 0
             canQuit = false  // Prevent rapid successive quits
             hideHUD()
@@ -318,25 +386,25 @@ class HotkeyBlockerManager: ObservableObject {
             // Force quit the current application using NSRunningApplication
             DispatchQueue.main.async {
                 if let currentApp = NSWorkspace.shared.menuBarOwningApplication {
-                    print("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
+                    debugLog("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
                     
                     // Используем нативный API для завершения приложения
                     if let runningApp = NSRunningApplication(processIdentifier: currentApp.processIdentifier) {
                         if runningApp.terminate() {
-                            print("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
+                            debugLog("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
                         } else {
-                            print("❌ HotkeyBlocker: Failed to terminate, trying force terminate")
+                            debugLog("❌ HotkeyBlocker: Failed to terminate, trying force terminate")
                             // Если terminate не сработал, пробуем force terminate
                             if runningApp.forceTerminate() {
-                                print("✅ HotkeyBlocker: Successfully force terminated \(currentApp.localizedName ?? "Unknown")")
+                                debugLog("✅ HotkeyBlocker: Successfully force terminated \(currentApp.localizedName ?? "Unknown")")
                             } else {
-                                print("❌ HotkeyBlocker: Failed to force terminate, falling back to AppleScript")
+                                debugLog("❌ HotkeyBlocker: Failed to force terminate, falling back to AppleScript")
                                 // Запасной вариант - AppleScript
                                 self.terminateAppViaAppleScript(currentApp)
                             }
                         }
                     } else {
-                        print("❌ HotkeyBlocker: Could not create NSRunningApplication, falling back to AppleScript")
+                        debugLog("❌ HotkeyBlocker: Could not create NSRunningApplication, falling back to AppleScript")
                         self.terminateAppViaAppleScript(currentApp)
                     }
                 }
@@ -345,28 +413,28 @@ class HotkeyBlockerManager: ObservableObject {
             return nil  // Block the event since we're handling it ourselves
         }
         
-        print("🔒 HotkeyBlocker: Blocking quit attempt \(cmdQTries)/\(delay)")
+        debugLog("🔒 HotkeyBlocker: Blocking quit attempt \(cmdQTries)/\(delay)")
         return nil
     }
     
     private func handleCmdWDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        print("  ✅ Cmd+W detected!")
+        debugLog("  ✅ Cmd+W detected!")
         
         // Check if current app is excluded from protection
         if exclusionManager.isCurrentAppExcluded() {
-            print("  ⚠️ Current app is excluded from protection")
+            debugLog("  ⚠️ Current app is excluded from protection")
             return Unmanaged.passUnretained(event)
         }
         
         // Check canClose first
         guard canClose else {
-            print("  ❌ Not allowed to close yet")
+            debugLog("  ❌ Not allowed to close yet")
             return nil
         }
         
         // Show HUD if we're within delay
         if cmdWTries <= delay {
-            print("  📱 Showing HUD")
+            debugLog("  📱 Showing HUD")
             showHUD(delayTime: TimeInterval(delay), hotkey: "Cmd+W")
         } else {
             // Hide HUD if we're past the delay
@@ -374,17 +442,17 @@ class HotkeyBlockerManager: ObservableObject {
         }
         
         cmdWTries += 1
-        print("🔢 HotkeyBlocker: cmdWTries = \(cmdWTries), delay = \(delay)")
+        debugLog("🔢 HotkeyBlocker: cmdWTries = \(cmdWTries), delay = \(delay)")
         
         if cmdWTries > delay {
-            print("🔓 HotkeyBlocker: Close allowed after holding for \(delay) seconds")
+            debugLog("🔓 HotkeyBlocker: Close allowed after holding for \(delay) seconds")
             cmdWTries = 0
             canClose = false  // Prevent rapid successive closes
             hideHUD()
             
             // Send Cmd+W event to close the window
             DispatchQueue.main.async {
-                print("🚪 HotkeyBlocker: Sending Cmd+W to close window")
+                debugLog("🚪 HotkeyBlocker: Sending Cmd+W to close window")
                 // Create and post a new Cmd+W event
                 if let newEvent = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true) {
                     newEvent.flags = .maskCommand
@@ -395,12 +463,12 @@ class HotkeyBlockerManager: ObservableObject {
             return nil  // Block the original event since we're handling it ourselves
         }
         
-        print("🔒 HotkeyBlocker: Blocking close attempt \(cmdWTries)/\(delay)")
+        debugLog("🔒 HotkeyBlocker: Blocking close attempt \(cmdWTries)/\(delay)")
         return nil
     }
     
     func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        print("🔍 HotkeyBlocker: KeyUp event received")
+        debugLog("🔍 HotkeyBlocker: KeyUp event received")
         
         let flags = event.flags
         let keyCode = getKeyCode(from: event)
@@ -427,17 +495,17 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     private func handleCmdQUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        print("  ✅ KeyUp: Q key detected")
+        debugLog("  ✅ KeyUp: Q key detected")
         
         // Log accidental quit if we didn't hold long enough
         if cmdQTries <= delay {
-            print("📊 HotkeyBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
+            debugLog("📊 HotkeyBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
             logAccidentalQuit()
         } else {
             hideHUD()
         }
         
-        print("🔄 HotkeyBlocker: Resetting cmdQTries from \(cmdQTries) to 0")
+        debugLog("🔄 HotkeyBlocker: Resetting cmdQTries from \(cmdQTries) to 0")
         cmdQTries = 0
         canQuit = true  // Allow next quit attempt
         
@@ -445,17 +513,17 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     private func handleCmdWUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        print("  ✅ KeyUp: W key detected")
+        debugLog("  ✅ KeyUp: W key detected")
         
         // Log accidental close if we didn't hold long enough
         if cmdWTries <= delay {
-            print("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
+            debugLog("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
             logAccidentalClose()
         } else {
             hideHUD()
         }
         
-        print("🔄 HotkeyBlocker: Resetting cmdWTries from \(cmdWTries) to 0")
+        debugLog("🔄 HotkeyBlocker: Resetting cmdWTries from \(cmdWTries) to 0")
         cmdWTries = 0
         canClose = true  // Allow next close attempt
         
@@ -472,28 +540,28 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     private func isCmdQActive(for app: NSRunningApplication) -> Bool {
-        print("  🔍 Checking if Cmd+Q is active for: \(app.localizedName ?? "Unknown")")
+        debugLog("  🔍 Checking if Cmd+Q is active for: \(app.localizedName ?? "Unknown")")
         
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var menuBar: AnyObject?
         
         let result = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBar)
         guard result == .success, let menuBar = menuBar else {
-            print("  ❌ Failed to get menu bar (result: \(result))")
+            debugLog("  ❌ Failed to get menu bar (result: \(result))")
             return false
         }
         
-        print("  ✅ Menu bar found")
+        debugLog("  ✅ Menu bar found")
         
         var children: AnyObject?
         let menuResult = AXUIElementCopyAttributeValue(menuBar as! AXUIElement, kAXChildrenAttribute as CFString, &children)
         
         guard menuResult == .success, let items = children as? NSArray, items.count > 1 else {
-            print("  ❌ Failed to get menu items (result: \(menuResult), count: \((children as? NSArray)?.count ?? 0))")
+            debugLog("  ❌ Failed to get menu items (result: \(menuResult), count: \((children as? NSArray)?.count ?? 0))")
             return false
         }
         
-        print("  ✅ Menu items found: \(items.count)")
+        debugLog("  ✅ Menu items found: \(items.count)")
         
         // Get the submenus of the first item (Apple menu) - like original QBlocker
         var subMenus: AnyObject?
@@ -501,11 +569,11 @@ class HotkeyBlockerManager: ObservableObject {
         let subMenuResult = AXUIElementCopyAttributeValue(title, kAXChildrenAttribute as CFString, &subMenus)
         
         guard subMenuResult == .success, let menus = subMenus as? NSArray, menus.count > 0 else {
-            print("  ❌ Failed to get sub menus (result: \(subMenuResult))")
+            debugLog("  ❌ Failed to get sub menus (result: \(subMenuResult))")
             return false
         }
         
-        print("  ✅ Sub menus found: \(menus.count)")
+        debugLog("  ✅ Sub menus found: \(menus.count)")
         
         // Get the entries of the submenu - like original QBlocker
         var entries: AnyObject?
@@ -513,11 +581,11 @@ class HotkeyBlockerManager: ObservableObject {
         let entriesResult = AXUIElementCopyAttributeValue(submenu, kAXChildrenAttribute as CFString, &entries)
         
         guard entriesResult == .success, let menuItems = entries as? NSArray, menuItems.count > 0 else {
-            print("  ❌ Failed to get menu entries (result: \(entriesResult))")
+            debugLog("  ❌ Failed to get menu entries (result: \(entriesResult))")
             return false
         }
         
-        print("  ✅ Menu entries found: \(menuItems.count)")
+        debugLog("  ✅ Menu entries found: \(menuItems.count)")
         
         // Check each menu item for Cmd+Q - like original QBlocker
         for (index, menu) in menuItems.enumerated() {
@@ -525,15 +593,15 @@ class HotkeyBlockerManager: ObservableObject {
             let cmdResult = AXUIElementCopyAttributeValue(menu as! AXUIElement, kAXMenuItemCmdCharAttribute as CFString, &cmdChar)
             
             if cmdResult == .success, let char = cmdChar as? String {
-                print("  📋 Menu item \(index): cmdChar = '\(char)'")
+                debugLog("  📋 Menu item \(index): cmdChar = '\(char)'")
                 if char == "Q" {
-                    print("  ✅ Found Cmd+Q in menu!")
+                    debugLog("  ✅ Found Cmd+Q in menu!")
                     return true
                 }
             }
         }
         
-        print("  ❌ Cmd+Q not found in menu")
+        debugLog("  ❌ Cmd+Q not found in menu")
         return false
     }
     
@@ -555,34 +623,37 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     private func logAccidentalQuit() {
-        accidentalQuits += 1
+        internalAccidentalQuits += 1
         saveSettings()
-        print("📊 HotkeyBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
+        
+        // Обновляем UI счетчик (throttling не нужен, так как событие редкое)
+        DispatchQueue.main.async {
+            self.accidentalQuits = self.internalAccidentalQuits
+        }
+        
+        debugLog("📊 HotkeyBlocker: Accidental quit prevented! Total: \(internalAccidentalQuits)")
     }
     
     private func logAccidentalClose() {
-        accidentalCloses += 1
+        internalAccidentalCloses += 1
         saveSettings()
-        print("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
+        
+        // Обновляем UI счетчик
+        DispatchQueue.main.async {
+            self.accidentalCloses = self.internalAccidentalCloses
+        }
+        
+        debugLog("📊 HotkeyBlocker: Accidental close prevented! Total: \(internalAccidentalCloses)")
     }
     
     private func terminateAppViaAppleScript(_ app: NSRunningApplication) {
         let appName = app.localizedName ?? "Unknown"
-        print("🔄 HotkeyBlocker: Using AppleScript fallback to terminate \(appName)")
+        debugLog("🔄 HotkeyBlocker: Using AppleScript fallback to terminate \(appName)")
         
-        let script = """
-        tell application "\(appName)" to quit
-        """
-        
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        
-        do {
-            try task.run()
-            print("✅ HotkeyBlocker: Successfully terminated \(appName) via AppleScript")
-        } catch {
-            print("❌ HotkeyBlocker: Failed to terminate \(appName) via AppleScript: \(error)")
+        if AppleScriptCache.shared.executeQuit(for: appName) {
+            debugLog("✅ HotkeyBlocker: Successfully terminated \(appName) via AppleScript")
+        } else {
+            debugLog("❌ HotkeyBlocker: Failed to terminate \(appName) via AppleScript")
         }
     }
 }

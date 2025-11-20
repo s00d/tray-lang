@@ -23,16 +23,8 @@ struct ExcludedApp: Identifiable, Codable, Equatable {
     var path: String
     
     // Вспомогательное свойство для получения иконки приложения
-    var appIcon: NSImage? {
-        // Ищем приложение по bundleID
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            // Если не нашли, можно попробовать по сохраненному пути как фолбэк
-            if FileManager.default.fileExists(atPath: self.path) {
-                return NSWorkspace.shared.icon(forFile: self.path)
-            }
-            return nil
-        }
-        return NSWorkspace.shared.icon(forFile: url.path)
+    var appIcon: NSImage {
+        return IconCache.shared.icon(for: bundleID)
     }
     
     init(name: String, bundleID: String, path: String) {

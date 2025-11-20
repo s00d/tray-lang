@@ -14,8 +14,6 @@ class KeyboardLayoutManager: ObservableObject {
     @Published var currentLayout: KeyboardLayout?
     @Published var availableLayouts: [KeyboardLayout] = []
     
-    private var layoutCheckTimer: Timer?
-    
     init() {
         loadAvailableLayouts()
         updateCurrentLayout()
@@ -23,7 +21,7 @@ class KeyboardLayoutManager: ObservableObject {
     }
     
     deinit {
-        layoutCheckTimer?.invalidate()
+        DistributedNotificationCenter.default().removeObserver(self)
     }
     
     // MARK: - Layout Management
@@ -72,7 +70,18 @@ class KeyboardLayoutManager: ObservableObject {
     }
     
     private func startLayoutMonitoring() {
-        layoutCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Используем системное уведомление вместо таймера
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(layoutChanged),
+            name: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+            object: nil
+        )
+    }
+    
+    @objc private func layoutChanged() {
+        // Важно: UI обновляем на главном потоке
+        DispatchQueue.main.async { [weak self] in
             self?.updateCurrentLayout()
         }
     }

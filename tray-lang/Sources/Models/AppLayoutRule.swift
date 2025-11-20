@@ -8,11 +8,8 @@ struct AppLayoutRule: Identifiable, Codable, Hashable {
     var layoutID: String // ID раскладки, например "com.apple.keylayout.US"
     
     // Вспомогательное свойство для отображения иконки приложения
-    var appIcon: NSImage? {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) else {
-            return nil
-        }
-        return NSWorkspace.shared.icon(forFile: url.path)
+    var appIcon: NSImage {
+        return IconCache.shared.icon(for: appBundleID)
     }
 }
 

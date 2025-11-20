@@ -19,9 +19,12 @@ class AppCoordinator: ObservableObject {
     let autoLaunchManager: AutoLaunchManager
     let textProcessingManager: TextProcessingManager
     var smartLayoutManager: SmartLayoutManager
-    var hotkeyBlockerManager: HotkeyBlockerManager
-    let exclusionManager: ExclusionManager
     let notificationManager: NotificationManager
+    // Lazy loading для менеджеров, которые не нужны мгновенно при запуске
+    lazy var exclusionManager: ExclusionManager = ExclusionManager()
+    lazy var hotkeyBlockerManager: HotkeyBlockerManager = {
+        return HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
+    }()
     let windowManager: WindowManager
     
     private var stateUpdateTimer: Timer?
@@ -37,8 +40,7 @@ class AppCoordinator: ObservableObject {
         self.textProcessingManager = TextProcessingManager(textTransformer: textTransformer, keyboardLayoutManager: keyboardLayoutManager)
         self.smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
         self.notificationManager = NotificationManager()
-        self.exclusionManager = ExclusionManager()
-        self.hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
+        // hotkeyBlockerManager инициализируется lazy (после exclusionManager)
         self.windowManager = WindowManager()
         
         // --- Первоначальная инициализация состояния ---

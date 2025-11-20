@@ -16,11 +16,8 @@ struct RememberedLayout: Identifiable, Hashable {
     var layoutID: String
     var layoutName: String
     
-    var appIcon: NSImage? {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) else {
-            return nil
-        }
-        return NSWorkspace.shared.icon(forFile: url.path)
+    var appIcon: NSImage {
+        return IconCache.shared.icon(for: appBundleID)
     }
 }
 
@@ -52,6 +49,9 @@ class SmartLayoutManager: ObservableObject {
     
     private let keyboardLayoutManager: KeyboardLayoutManager
     private var rememberedLayouts: [String: String] = [:] // Переименовали для ясности
+    
+    // Throttling для сохранения
+    private var needsSave = false
     
     // Ключи для UserDefaults
     private let rulesUserDefaultsKey = "smartLayoutRules"
@@ -95,10 +95,24 @@ class SmartLayoutManager: ObservableObject {
         
         // Запоминаем раскладку, только если нет правила
         if !defaultRules.contains(where: { $0.appBundleID == bundleID }) {
-            rememberedLayouts[bundleID] = currentLayout.id
-            saveRememberedLayouts()
-            updatePublishedRememberedLayouts() // Обновляем UI
-            print("🧠 Saved layout '\(currentLayout.localizedName)' for \(bundleID)")
+            if rememberedLayouts[bundleID] != currentLayout.id {
+                rememberedLayouts[bundleID] = currentLayout.id
+                needsSave = true
+                
+                // Сохраняем с задержкой (debounce), чтобы не писать на диск при быстром Alt+Tab
+                scheduleSave()
+                
+                updatePublishedRememberedLayouts() // Обновляем UI сразу
+                print("🧠 Saved layout '\(currentLayout.localizedName)' for \(bundleID)")
+            }
+        }
+    }
+    
+    @objc private func performSave() {
+        if needsSave {
+            UserDefaults.standard.set(rememberedLayouts, forKey: rememberedUserDefaultsKey)
+            needsSave = false
+            print("🧠 Layouts saved to UserDefaults")
         }
     }
     
@@ -173,8 +187,25 @@ class SmartLayoutManager: ObservableObject {
         }
     }
     
+    private var saveTask: DispatchWorkItem?
+    
+    private func scheduleSave() {
+        // Отменяем предыдущую задачу сохранения
+        saveTask?.cancel()
+        
+        // Создаем новую задачу с задержкой
+        let task = DispatchWorkItem { [weak self] in
+            self?.performSave()
+        }
+        saveTask = task
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: task)
+    }
+    
     private func saveRememberedLayouts() {
-        UserDefaults.standard.set(rememberedLayouts, forKey: rememberedUserDefaultsKey)
+        // Используем throttling вместо немедленного сохранения
+        needsSave = true
+        scheduleSave()
     }
     
     private func loadRememberedLayouts() {
