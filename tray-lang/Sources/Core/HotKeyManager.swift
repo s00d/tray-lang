@@ -8,6 +8,7 @@ class HotKeyManager: ObservableObject {
     
     // 1. УБИРАЕМ didSet.
     @Published var isEnabled: Bool = false
+    @Published var isSecureInputActive: Bool = false
     
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -16,6 +17,9 @@ class HotKeyManager: ObservableObject {
     private var monitoringThread: Thread?
     private var monitoringRunLoop: CFRunLoop?
     
+    // Таймер для мониторинга Secure Input
+    private var secureInputTimer: Timer?
+    
     init() {
         // 2. УБИРАЕМ загрузку isEnabled из init.
         loadHotKey()
@@ -23,6 +27,7 @@ class HotKeyManager: ObservableObject {
     
     deinit {
         stopMonitoring()
+        stopSecureInputMonitoring()
     }
     
     // 3. ДОБАВЛЯЕМ функцию сохранения isEnabled, которую будет вызывать AppCoordinator
@@ -80,6 +85,9 @@ class HotKeyManager: ObservableObject {
     func startMonitoring() {
         guard !isEnabled else { return }
         
+        // Запускаем мониторинг Secure Input
+        startSecureInputMonitoring()
+        
         // Создаем поток для мониторинга
         monitoringThread = Thread { [weak self] in
             guard let self = self else { return }
@@ -128,6 +136,9 @@ class HotKeyManager: ObservableObject {
     func stopMonitoring() {
         guard isEnabled else { return }
         
+        // Останавливаем мониторинг Secure Input
+        stopSecureInputMonitoring()
+        
         // Останавливаем RunLoop потока
         if let runLoop = monitoringRunLoop {
             CFRunLoopStop(runLoop)
@@ -155,6 +166,16 @@ class HotKeyManager: ObservableObject {
     
     // MARK: - Event Handling
     private func handleKeyEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // Обрабатываем отключение Event Tap системой
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            debugLog("⚠️ Event Tap disabled by system (type: \(type.rawValue)). Attempting to re-enable...")
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+                debugLog("🔄 Event Tap re-enabled")
+            }
+            return nil
+        }
+        
         guard type == .keyDown else { return Unmanaged.passUnretained(event) }
         
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
@@ -168,6 +189,41 @@ class HotKeyManager: ObservableObject {
         }
         
         return Unmanaged.passUnretained(event)
+    }
+    
+    // MARK: - Secure Input Monitoring
+    private func startSecureInputMonitoring() {
+        // Проверяем состояние сразу
+        checkSecureInput()
+        
+        // Запускаем таймер для периодической проверки (каждые 2 секунды)
+        secureInputTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.checkSecureInput()
+        }
+        
+        debugLog("✅ Мониторинг Secure Input запущен")
+    }
+    
+    private func stopSecureInputMonitoring() {
+        secureInputTimer?.invalidate()
+        secureInputTimer = nil
+        debugLog("⏹️ Мониторинг Secure Input остановлен")
+    }
+    
+    private func checkSecureInput() {
+        let isSecure = IsSecureEventInputEnabled()
+        
+        // Обновляем состояние только если оно изменилось
+        if isSecureInputActive != isSecure {
+            DispatchQueue.main.async {
+                self.isSecureInputActive = isSecure
+                if isSecure {
+                    debugLog("⚠️ Secure Input активен - перехват клавиш может не работать")
+                } else {
+                    debugLog("✅ Secure Input деактивирован - перехват клавиш работает")
+                }
+            }
+        }
     }
 }
 

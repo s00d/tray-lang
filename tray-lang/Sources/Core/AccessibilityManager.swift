@@ -1,39 +1,90 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import Combine
 
-class AccessibilityManager {
+/// УЛУЧШЕННЫЙ AccessibilityManager с реактивным мониторингом
+/// Использует Combine для автоматического обновления состояния прав доступа
+@MainActor
+class AccessibilityManager: ObservableObject {
+    // НОВОЕ: Это свойство "живое". UI автоматически подпишется и обновится
+    @Published var isGranted: Bool = false
     
-    /// Просто проверяет текущий системный статус.
-    func isAccessibilityGranted() -> Bool {
-        return AXIsProcessTrusted()
+    private var checkTimer: AnyCancellable?
+    
+    init() {
+        // 1. Первая проверка при запуске
+        checkStatus()
+        
+        // 2. Запускаем "сердцебиение" (Polling)
+        // Проверяем статус каждую секунду. Это ничтожная нагрузка на CPU (<0.01%)
+        startMonitoring()
+        
+        debugLog("✅ AccessibilityManager инициализирован с реактивным мониторингом")
     }
     
-    /// Запускает процесс запроса прав или открывает Настройки.
-    @MainActor
-    func requestPermissions() {
+    /// Принудительная разовая проверка статуса
+    func checkStatus() {
+        let currentStatus = AXIsProcessTrusted()
+        if isGranted != currentStatus {
+            debugLog("🔐 Accessibility Status Changed: \(isGranted) -> \(currentStatus)")
+            isGranted = currentStatus
+        }
+    }
+    
+    /// Legacy метод для обратной совместимости (если где-то используется)
+    func isAccessibilityGranted() -> Bool {
+        return isGranted
+    }
+    
+    /// Запуск постоянного мониторинга через Combine Timer
+    private func startMonitoring() {
+        checkTimer = Timer.publish(every: 1.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.checkStatus()
+            }
+        
+        debugLog("🔄 Мониторинг прав доступа запущен (проверка каждую секунду)")
+    }
+    
+    /// Запрос прав доступа (открытие системного диалога)
+    func requestPermissions() async {
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]
-        // Этот вызов либо покажет системный диалог, либо вернет текущий статус.
-        // Если права уже были отклонены, он ничего не покажет.
-        if !AXIsProcessTrustedWithOptions(options) {
-            // Если диалог не был показан (потому что права уже отклонены),
-            // вручную открываем настройки.
+        let accessEnabled = AXIsProcessTrustedWithOptions(options)
+        
+        debugLog("🔑 Запрос прав доступа: текущий статус = \(accessEnabled)")
+        
+        if !accessEnabled {
+            // Если диалог не появился (например, права уже отклонены),
+            // показываем инструкцию и открываем настройки
             showGoToSettingsAlert()
         }
     }
     
-    @MainActor
     private func showGoToSettingsAlert() {
         let alert = NSAlert()
-        alert.messageText = "Требуются разрешения на доступность"
-        alert.informativeText = "Tray Lang нуждается в разрешениях для управления текстом. Пожалуйста, включите их в Системных Настройках."
+        alert.messageText = "Accessibility Permissions Required"
+        alert.informativeText = "Tray Lang needs accessibility permissions to perform text conversion and handle hotkeys.\n\nPlease enable Tray Lang in System Settings > Privacy & Security > Accessibility."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Открыть Системные Настройки")
-        alert.addButton(withTitle: "Позже")
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
         
         if alert.runModal() == .alertFirstButtonReturn {
-            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            NSWorkspace.shared.open(url)
+            openSystemPreferences()
         }
+    }
+    
+    private func openSystemPreferences() {
+        // Открываем конкретную страницу настроек (работает на macOS 13+)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+            debugLog("🔧 Открыты системные настройки (Accessibility)")
+        }
+    }
+    
+    deinit {
+        checkTimer?.cancel()
+        debugLog("⏹️ AccessibilityManager деинициализирован")
     }
 }

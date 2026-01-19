@@ -1,6 +1,25 @@
 import SwiftUI
 import AppKit
 
+// MARK: - NSImage Extension
+extension NSImage {
+    func withTintColor(_ color: NSColor) -> NSImage {
+        guard let cgImage = self.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return self
+        }
+        
+        return NSImage(size: size, flipped: false) { bounds in
+            color.setFill()
+            bounds.fill()
+            
+            let imageRect = NSRect(origin: .zero, size: self.size)
+            self.draw(in: imageRect, from: imageRect, operation: .destinationIn, fraction: 1.0)
+            
+            return true
+        }
+    }
+}
+
 // MARK: - Window Manager
 @MainActor
 class WindowManager: NSObject, ObservableObject, NSMenuDelegate {
@@ -56,18 +75,52 @@ class WindowManager: NSObject, ObservableObject, NSMenuDelegate {
     }
     
     func updateStatusItemTitle(shortName: String) {
-        statusItem?.button?.title = shortName
+        // ИСПРАВЛЕНО: Гарантируем выполнение в main thread
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItem?.button?.title = shortName
+        }
+    }
+    
+    // НОВОЕ: Обновление иконки статус-бара в зависимости от состояния
+    func updateStatusItemIcon(isSecureInputActive: Bool = false, isEnabled: Bool = true) {
+        // ИСПРАВЛЕНО: Гарантируем выполнение в main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let button = self?.statusItem?.button else { return }
+            
+            if isSecureInputActive {
+                // Secure Input активен - показываем замок (желтый)
+                button.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Secure Input Active")
+                button.image?.isTemplate = false
+                // Окрашиваем в желтый
+                let yellowImage = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Secure Input Active")
+                yellowImage?.isTemplate = false
+                let coloredImage = yellowImage?.withTintColor(.systemYellow)
+                button.image = coloredImage
+            } else if !isEnabled {
+                // Отключено - показываем перечеркнутую клавиатуру (серый)
+                button.image = NSImage(systemSymbolName: "keyboard.slash", accessibilityDescription: "Tray Lang Disabled")
+                button.image?.isTemplate = true
+            } else {
+                // Нормальный режим - обычная клавиатура
+                button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Tray Lang")
+                button.image?.isTemplate = true
+            }
+        }
     }
     
     // MARK: - NSMenuDelegate
     
     // Эта функция будет вызываться каждый раз перед открытием меню
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard let coordinator = coordinator else { return }
-        
-        // Обновляем состояние галочек
-        autoLaunchMenuItem?.state = coordinator.autoLaunchManager.isAutoLaunchEnabled() ? .on : .off
-        smartLayoutMenuItem?.state = coordinator.smartLayoutManager.isEnabled ? .on : .off
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Гарантируем выполнение в main thread!
+        // NSMenu delegate может вызываться из любого потока
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let coordinator = self.coordinator else { return }
+            
+            // Обновляем состояние галочек
+            self.autoLaunchMenuItem?.state = coordinator.autoLaunchManager.isAutoLaunchEnabled() ? .on : .off
+            self.smartLayoutMenuItem?.state = coordinator.smartLayoutManager.isEnabled ? .on : .off
+        }
     }
     
     // MARK: - Menu Actions
@@ -159,8 +212,11 @@ extension WindowManager: NSWindowDelegate {
     
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow, window == mainWindow {
+            // ИСПРАВЛЕНО: Очищаем contentView для разрыва retain cycles SwiftUI
+            window.contentView = nil
             mainWindow = nil
             hideDockIcon()
+            debugLog("🧹 WindowManager: Окно закрыто и очищено от retain cycles")
         }
     }
 } 

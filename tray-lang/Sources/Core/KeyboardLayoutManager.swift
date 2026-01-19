@@ -88,7 +88,7 @@ class KeyboardLayoutManager: ObservableObject {
     
     // MARK: - System Integration
     
-    // Новый универсальный метод для извлечения информации
+    // УЛУЧШЕННЫЙ универсальный метод для извлечения информации о раскладке
     private func extractLayoutInfo(from source: TISInputSource) -> KeyboardLayout? {
         guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
               let namePtr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else {
@@ -97,26 +97,129 @@ class KeyboardLayoutManager: ObservableObject {
         
         let layoutID = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
         let localizedName = Unmanaged<CFString>.fromOpaque(namePtr).takeUnretainedValue() as String
-        var shortName = "??".uppercased()
+        var shortName = ""
 
-        // Самый надежный способ: получаем языковой код (ISO 639)
+        // МЕТОД 1: Получаем языковой код (ISO 639) - самый надежный способ
         if let langPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages),
            let languages = Unmanaged<CFArray>.fromOpaque(langPtr).takeUnretainedValue() as? [String],
            let firstLang = languages.first {
-            shortName = firstLang.uppercased()
-        } else {
-            // Фолбэк: если языковой код не указан, пытаемся угадать по ID
-            if layoutID.lowercased().contains("abc") || layoutID.lowercased().contains("us") {
-                shortName = "EN"
-            } else {
-                let components = layoutID.split(separator: ".")
-                if let lastComponent = components.last {
-                    shortName = String(lastComponent.prefix(2)).uppercased()
-                }
-            }
+            shortName = normalizeLanguageCode(firstLang)
+        }
+        
+        // МЕТОД 2: Если языковой код не найден, пытаемся определить по ID раскладки
+        if shortName.isEmpty {
+            shortName = extractShortNameFromLayoutID(layoutID)
+        }
+        
+        // МЕТОД 3: Если все еще не найден, берем первые 2 символа из имени
+        if shortName.isEmpty {
+            shortName = String(localizedName.prefix(2)).uppercased()
+        }
+        
+        // МЕТОД 4: Крайний случай - показываем иконку "неизвестно"
+        if shortName.isEmpty {
+            shortName = "?" // Показываем один символ вопроса вместо "??"
         }
         
         return KeyboardLayout(id: layoutID, localizedName: localizedName, shortName: shortName)
+    }
+    
+    // Нормализует языковой код ISO 639 в двухбуквенный код
+    private func normalizeLanguageCode(_ code: String) -> String {
+        // Маппинг известных кодов
+        let languageMap: [String: String] = [
+            "en": "EN",
+            "ru": "RU",
+            "ru-Russian": "RU",
+            "en-US": "EN",
+            "en-GB": "GB",
+            "fr": "FR",
+            "de": "DE",
+            "es": "ES",
+            "it": "IT",
+            "pt": "PT",
+            "ja": "JP",
+            "zh": "CN",
+            "zh-Hans": "CN",
+            "zh-Hant": "TW",
+            "ko": "KR",
+            "ar": "AR",
+            "he": "IL",
+            "hi": "IN",
+            "uk": "UA",
+            "pl": "PL",
+            "cs": "CZ",
+            "tr": "TR",
+            "nl": "NL",
+            "sv": "SE",
+            "da": "DK",
+            "no": "NO",
+            "fi": "FI"
+        ]
+        
+        // Если есть точное совпадение, возвращаем его
+        if let mapped = languageMap[code] {
+            return mapped
+        }
+        
+        // Если код содержит дефис (например, "en-US"), берем первую часть
+        if let firstPart = code.split(separator: "-").first {
+            let normalized = String(firstPart)
+            if let mapped = languageMap[normalized] {
+                return mapped
+            }
+            return normalized.uppercased()
+        }
+        
+        // Иначе просто uppercase первых 2 символов
+        return String(code.prefix(2)).uppercased()
+    }
+    
+    // Извлекает короткое имя из ID раскладки
+    private func extractShortNameFromLayoutID(_ layoutID: String) -> String {
+        // Известные паттерны в ID раскладок
+        let idMap: [String: String] = [
+            "abc": "EN",
+            "us": "EN",
+            "russian": "RU",
+            "french": "FR",
+            "german": "DE",
+            "spanish": "ES",
+            "italian": "IT",
+            "portuguese": "PT",
+            "japanese": "JP",
+            "chinese": "CN",
+            "korean": "KR",
+            "arabic": "AR",
+            "hebrew": "IL",
+            "hindi": "IN",
+            "ukrainian": "UA",
+            "polish": "PL",
+            "czech": "CZ",
+            "turkish": "TR",
+            "dutch": "NL",
+            "swedish": "SE",
+            "danish": "DK",
+            "norwegian": "NO",
+            "finnish": "FI"
+        ]
+        
+        let lowercaseID = layoutID.lowercased()
+        
+        // Проверяем известные паттерны
+        for (pattern, shortName) in idMap {
+            if lowercaseID.contains(pattern) {
+                return shortName
+            }
+        }
+        
+        // Если ничего не найдено, берем последний компонент ID (после последней точки)
+        let components = layoutID.split(separator: ".")
+        if let lastComponent = components.last {
+            return String(lastComponent.prefix(2)).uppercased()
+        }
+        
+        return ""
     }
 
     private func getSystemLayouts() -> [KeyboardLayout] {

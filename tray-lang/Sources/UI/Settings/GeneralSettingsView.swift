@@ -18,16 +18,30 @@ struct GeneralSettingsView: View {
                     .disabled(coordinator.isAccessibilityGranted)
                 }
                 
+                // НОВОЕ: Индикатор Secure Input
+                if coordinator.hotKeyManager.isSecureInputActive {
+                    SettingsRow(
+                        icon: "exclamationmark.shield",
+                        iconColor: .yellow,
+                        title: "Secure Input Active",
+                        subtitle: "Hotkey capture is temporarily disabled"
+                    ) {
+                        Text("Waiting...")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                    }
+                }
+                
                 HStack(spacing: 16) {
                     StatusIndicator(
-                        isActive: coordinator.isTextConversionEnabled && coordinator.isAccessibilityGranted, // Добавили проверку прав
+                        isActive: coordinator.isTextConversionEnabled && coordinator.isAccessibilityGranted && !coordinator.hotKeyManager.isSecureInputActive,
                         icon: "keyboard",
                         color: .green,
                         tooltip: "Hotkey Active"
                     )
                     
                     StatusIndicator(
-                        isActive: (coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled) && coordinator.isAccessibilityGranted, // Добавили проверку прав
+                        isActive: (coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled) && coordinator.isAccessibilityGranted,
                         icon: "shield",
                         color: .orange,
                         tooltip: "Protection Active"

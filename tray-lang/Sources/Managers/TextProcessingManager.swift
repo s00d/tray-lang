@@ -2,439 +2,352 @@ import Foundation
 import AppKit
 import ApplicationServices
 
-// НОВЫЙ ENUM для статуса выделения
 enum SelectionStatus {
     case selected
     case notSelected
-    case unknown // Не удалось определить (например, приложение не отвечает)
+    case unknown
 }
 
-// MARK: - Text Processing Manager
 class TextProcessingManager: ObservableObject {
     private let textTransformer: TextTransformer
     private let keyboardLayoutManager: KeyboardLayoutManager
+    
+    // Список терминалов
+    private let terminalBundleIDs = [
+        "com.apple.Terminal",           // Apple Terminal
+        "com.googlecode.iterm2",        // iTerm2
+        "co.zeit.hyper",                // Hyper
+        "org.alacritty",                // Alacritty
+        "io.alacritty",                 // Alacritty (alt)
+        "net.kovidgoyal.kitty",         // Kitty
+        "dev.warp.Warp-Stable",         // Warp
+        "com.github.wez.wezterm",       // WezTerm
+        "com.microsoft.VSCode",         // VS Code (терминал)
+        "com.googlecode.iterm2-nightly" // iTerm2 Nightly
+    ]
     
     init(textTransformer: TextTransformer, keyboardLayoutManager: KeyboardLayoutManager) {
         self.textTransformer = textTransformer
         self.keyboardLayoutManager = keyboardLayoutManager
     }
     
-    // MARK: - Pre-check
-    // Функция для безопасного получения атрибута с таймаутом
-    private func getAXAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
-        var result: CFTypeRef?
-        
-        // Устанавливаем короткий таймаут (0.1 сек) для предотвращения зависаний
-        AXUIElementSetMessagingTimeout(element, 0.1)
-        
-        let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
-        
-        if error == .success {
-            return result
-        }
-        return nil
-    }
-    
-    // ИЗМЕНЕННАЯ функция проверки с таймаутами
-    private func checkSelectionStatus() -> SelectionStatus {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            debugLog("🔍 checkSelectionStatus: Не удалось получить активное приложение.")
-            return .unknown
-        }
-        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
-        
-        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
-            debugLog("🔍 checkSelectionStatus: Не удалось получить элемент в фокусе.")
-            return .unknown
-        }
-        let focusedElement = focusedElementRef as! AXUIElement
-              
-        guard let selectedRange = getAXAttribute(focusedElement, kAXSelectedTextRangeAttribute as String) else {
-            debugLog("🔍 checkSelectionStatus: Элемент не поддерживает kAXSelectedTextRangeAttribute. Статус неизвестен.")
-            return .unknown // Ключевое изменение: если API не поддерживается, мы не знаем статус
-        }
-        let rangeValue = selectedRange as! AXValue
-              
-        var range = CFRange()
-        guard AXValueGetValue(rangeValue, .cfRange, &range) else {
-            debugLog("🔍 checkSelectionStatus: Не удалось конвертировать диапазон.")
-            return .unknown
-        }
-        
-        if range.length > 0 {
-            debugLog("🔍 checkSelectionStatus: Текст выделен (длина: \(range.length)).")
-            return .selected
-        } else {
-            debugLog("🔍 checkSelectionStatus: Текст не выделен.")
-            return .notSelected
-        }
-    }
-    
-    // MARK: - Text Processing
-    // ПОЛНОСТЬЮ НОВАЯ ЛОГИКА
+    // MARK: - Main Logic
     func processSelectedText() {
-        let status = checkSelectionStatus()
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleID = frontmostApp.bundleIdentifier else { return }
         
-        switch status {
-        case .notSelected:
-            debugLog("🤷 Текст не выделен. Операция отменена.")
+        debugLog("🚀 APP: \(frontmostApp.localizedName ?? "?") | Bundle ID: \(bundleID)")
+        
+        // 1. ЛОГИКА ДЛЯ ТЕРМИНАЛОВ
+        if terminalBundleIDs.contains(bundleID) {
+            debugLog("✅ Распознан терминал: \(frontmostApp.localizedName ?? bundleID)")
+            handleTerminalProcessing(app: frontmostApp)
             return
+        }
+        
+        // 2. СТАНДАРТНАЯ ЛОГИКА
+        debugLog("ℹ️ Обычное приложение, используем стандартную стратегию")
+        attemptAccessibilityStrategy()
+    }
+    
+    // MARK: - Terminal Logic (Backspace Strategy)
+    
+    private func handleTerminalProcessing(app: NSRunningApplication) {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        
+        // 1. Получаем весь текст окна или текущей области
+        guard let focused = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) as! AXUIElement?,
+              let fullText = getAXAttribute(focused, kAXValueAttribute as String) as? String,
+              !fullText.isEmpty else {
+            debugLog("❌ Терминал: Не удалось прочитать текст через Accessibility")
+            return
+        }
+        
+        debugLog("📋 Терминал: Прочитано \(fullText.count) символов")
+        
+        // 2. Вытаскиваем последнюю строку (текущую команду)
+        let lines = fullText.components(separatedBy: .newlines)
+        guard let lastLine = lines.reversed().first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else {
+            debugLog("ℹ️ Терминал: Пустая строка, нечего обрабатывать")
+            return
+        }
+        
+        debugLog("🖥 Сырая строка: '\(lastLine)'")
+        
+        // 3. Отделяем промпт (user % command)
+        let commandText = extractCommandFromPrompt(lastLine)
+        if commandText.isEmpty {
+            debugLog("⚠️ Терминал: Команда пустая после извлечения промпта")
+            return
+        }
+        
+        debugLog("🖥 Извлеченная команда: '\(commandText)'")
+        
+        // 4. Трансформируем
+        let transformedText = textTransformer.transformText(commandText)
+        if transformedText == commandText {
+            debugLog("ℹ️ Терминал: Текст не изменился после трансформации")
+            return
+        }
+        
+        debugLog("🔄 Терминал: '\(commandText)' -> '\(transformedText)'")
+        
+        // 5. ОЧИСТКА: Удаляем старый текст через Backspace
+        // Это самый надежный способ, так как терминал не дает стереть промпт
+        clearTerminalLine(length: commandText.count)
+        
+        // 6. ВСТАВКА
+        replaceTextViaPasteboardStrategy(transformedText)
+        
+        // 7. Переключение языка
+        switchToNextLayout()
+        
+        debugLog("✅ Терминал: Замена завершена")
+    }
+    
+    /// Очищает текст от терминального "мусора"
+    /// Удаляет левый промпт (ζ, $, %, >, #, ➜, ❯) и правый промпт (время, git статус, etc)
+    private func extractCommandFromPrompt(_ line: String) -> String {
+        var clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // ШАГ 1: Удаляем ЛЕВЫЙ промпт (user@host $ command)
+        // Ищем типичные разделители промптов
+        let prompts = ["$ ", "% ", "> ", "# ", "ζ ", ": ", "➜ ", "❯ ", "$", "%", ">", "#", "ζ"]
+        
+        for p in prompts {
+            if let range = clean.range(of: p, options: .backwards) {
+                // Берём текст ПОСЛЕ промпта
+                clean = String(clean[range.upperBound...])
+                break
+            }
+        }
+        
+        // ШАГ 2: Удаляем ПРАВЫЙ промпт (git статус, время, etc)
+        // Паттерн: много пробелов (2+) перед блоком в скобках [] () <> или временем HH:MM:SS
+        // Примеры правых промптов:
+        // - "   [5d7692a]" (git hash)
+        // - "   (main)" (git branch)
+        // - "   14:35:22" (время)
+        // - "   <env>" (виртуальное окружение)
+        let rightPromptPattern = "\\s{2,}(\\[.*?\\]|\\(.*?\\)|<.*?>|\\d{2}:\\d{2}(:\\d{2})?|[✔✘]).*?$"
+        
+        if let range = clean.range(of: rightPromptPattern, options: .regularExpression) {
+            clean.removeSubrange(range)
+        }
+        
+        // ШАГ 3: Финальная очистка пробелов
+        clean = clean.trimmingCharacters(in: .whitespaces)
+        
+        // Если после всех очисток ничего не осталось, возвращаем исходную строку (fallback)
+        return clean.isEmpty ? line.trimmingCharacters(in: .whitespaces) : clean
+    }
+    
+    /// ЖЕЛЕЗОБЕТОННАЯ СТРАТЕГИЯ: Ctrl+E (в конец) + Backspace N раз
+    /// Работает везде: zsh, bash, fish, vi-mode, ssh сессии
+    /// Терминал физически не даст стереть промпт - это его встроенная защита
+    private func clearTerminalLine(length: Int) {
+        // Ограничитель безопасности
+        let safeLength = min(length, 300)
+        
+        debugLog("🧹 Терминал: Очистка через Ctrl+E + Backspace x \(safeLength)")
+        
+        // 1. Жмем Ctrl+E (End), чтобы убедиться, что курсор в конце
+        sendCtrlKey(14) // 'E' = 14
+        usleep(20000) // 20ms
+        
+        // 2. Долбим Backspace нужное количество раз
+        // Добавляем +2 на случай лишних пробелов или ошибок подсчета
+        // Терминал не даст стереть промпт, так что можно смело
+        for i in 0..<(safeLength + 2) {
+            sendKey(51) // Backspace = 51
+            usleep(1000) // 1ms (быстро, но терминал успевает)
             
-        case .selected:
-            debugLog("🔄 Текст выделен, запускаем полную цепочку методов...")
-            // Запускаем полную цепочку, так как приложение "отзывчивое"
-            guard let selectedText = getSelectedText() else {
-                debugLog("❌ Не удалось получить выделенный текст, хотя выделение было обнаружено.")
-                return
-            }
-            performTransformation(with: selectedText)
-            
-        case .unknown:
-            debugLog("🤔 Статус выделения неизвестен. Приложение может быть несовместимо с Accessibility API. Пробуем запасной метод...")
-            // Приложение "неразговорчивое", пропускаем методы Accessibility и сразу идем к буферу обмена.
-            do {
-                if let selectedText = try getSelectedTextViaHotkeys() {
-                    performTransformation(with: selectedText)
-                } else {
-                    debugLog("❌ Запасной метод также не смог получить текст.")
-                }
-            } catch {
-                debugLog("❌ Ошибка при выполнении запасного метода: \(error)")
+            // Логируем прогресс для длинных команд
+            if safeLength > 50 && (i + 1) % 25 == 0 {
+                debugLog("  🧹 Удалено \(i + 1)/\(safeLength) символов...")
             }
         }
+        
+        // Небольшая пауза перед вставкой
+        usleep(50000) // 50ms
+        
+        debugLog("✅ Терминал: Строка очищена")
     }
     
-    // Вспомогательная функция, чтобы не дублировать код
-    private func performTransformation(with text: String) {
-        let transformedText = textTransformer.transformText(text)
-        debugLog("🔄 Трансформированный текст: \(transformedText)")
-        
-        if replaceSelectedText(with: transformedText) {
-            debugLog("✅ Текст успешно заменен, переключаем язык")
-            switchToNextLayout()
-        } else {
-            debugLog("❌ Не удалось заменить текст")
-        }
-    }
+    // MARK: - Helpers & Standard Logic
     
-    // MARK: - Text Retrieval
-    private func getSelectedText() -> String? {
-        debugLog("🔍 === НАЧАЛО ПОЛУЧЕНИЯ ВЫДЕЛЕННОГО ТЕКСТА ===")
-        
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            debugLog("❌ Не удалось получить активное приложение")
-            return nil
-        }
-        
-        debugLog("📱 Активное приложение: \(frontmostApp.localizedName ?? "Unknown") (PID: \(frontmostApp.processIdentifier))")
-        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
-        
-        // Метод 1: Попытка получить выделенный текст через kAXSelectedTextAttribute
-        debugLog("🔍 Метод 1: kAXSelectedTextAttribute")
-        do {
-            if let text = try getSelectedTextViaAttribute(appElement) {
-                debugLog("✅ Метод 1 УСПЕШЕН: \(text)")
-                return text
-            }
-        } catch {
-            debugLog("❌ Метод 1 ПРОВАЛЕН: \(error)")
-        }
-        
-        // Метод 2: Попытка получить текст через kAXValueAttribute
-        debugLog("🔍 Метод 2: kAXValueAttribute")
-        do {
-            if let text = try getSelectedTextViaValue(appElement) {
-                debugLog("✅ Метод 2 УСПЕШЕН: \(text)")
-                return text
-            }
-        } catch {
-            debugLog("❌ Метод 2 ПРОВАЛЕН: \(error)")
-        }
-        
-        // Метод 3: Попытка получить текст через AppleScript и горячие клавиши
-        debugLog("🔍 Метод 3: AppleScript + Hotkeys")
-        do {
-            if let text = try getSelectedTextViaHotkeys() {
-                debugLog("✅ Метод 3 УСПЕШЕН: \(text)")
-                return text
-            }
-        } catch {
-            debugLog("❌ Метод 3 ПРОВАЛЕН: \(error)")
-        }
-        
-        debugLog("❌ === ВСЕ МЕТОДЫ ПОЛУЧЕНИЯ ТЕКСТА ПРОВАЛЕНЫ ===")
-        return nil
-    }
-    
-    private func getSelectedTextViaAttribute(_ appElement: AXUIElement) throws -> String? {
-        debugLog("  🔍 Попытка получить фокусный элемент...")
-        
-        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
-            debugLog("  ❌ Не удалось получить фокусный элемент")
-            throw TrayLangError.textRetrievalFailed
-        }
-        let focusedElement = focusedElementRef as! AXUIElement
-        
-        debugLog("  ✅ Фокусный элемент получен")
-        
-        guard let selectedText = getAXAttribute(focusedElement, kAXSelectedTextAttribute as String) as? String, !selectedText.isEmpty else {
-            debugLog("  ❌ Текст не получен")
-            return nil
-        }
-        
-        debugLog("  ✅ Текст получен через kAXSelectedTextAttribute: '\(selectedText)'")
-        return selectedText
-    }
-    
-    private func getSelectedTextViaValue(_ appElement: AXUIElement) throws -> String? {
-        debugLog("  🔍 Попытка получить фокусный элемент для Value...")
-        
-        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
-            debugLog("  ❌ Не удалось получить фокусный элемент для Value")
-            return nil
-        }
-        let focusedElement = focusedElementRef as! AXUIElement
-        
-        debugLog("  ✅ Фокусный элемент получен для Value")
-        
-        guard let text = getAXAttribute(focusedElement, kAXValueAttribute as String) as? String, !text.isEmpty else {
-            debugLog("  ❌ Текст не получен через Value")
-            return nil
-        }
-        
-        debugLog("  ✅ Текст получен через kAXValueAttribute: '\(text)'")
-        return text
-    }
-    
-    private func getSelectedTextViaHotkeys() throws -> String? {
-        debugLog("  🔍 Выполняем копирование через CGEvent и NSPasteboard...")
-        
-        return getSelectedTextViaPasteboard()
-    }
-    
-    // MARK: - Reliable Pasteboard Methods
-    private func getSelectedTextViaPasteboard() -> String? {
+    private func replaceTextViaPasteboardStrategy(_ newText: String) {
         let pasteboard = NSPasteboard.general
+        // ✅ ИСПРАВЛЕНО: NSPasteboardItem не поддерживает NSCopying
+        // Используем ручное копирование через extension
+        let oldItems = pasteboard.pasteboardItems?.map { $0.manualDeepCopy() } ?? []
         
-        // 1. Сохраняем текущее состояние буфера обмена
-        let originalChangeCount = pasteboard.changeCount
-        var originalContent: String? = nil
-        if let originalString = pasteboard.string(forType: .string) {
-            originalContent = originalString
-        }
+        pasteboard.clearContents()
+        // TransientType - чтобы не мусорить в истории Maccy/Paste
+        pasteboard.declareTypes([.string, .init("org.nspasteboard.TransientType")], owner: nil)
+        pasteboard.setString(newText, forType: .string)
         
-        debugLog("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
-        
-        // 2. Симулируем Cmd+C
+        // Cmd+V
         let source = CGEventSource(stateID: .hidSystemState)
-        guard let cmdCDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true),
-              let cmdCUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false) else {
-            debugLog("  ❌ Не удалось создать события клавиатуры")
-            return nil
-        }
+        let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        down?.flags = .maskCommand
+        up?.flags = .maskCommand
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
         
-        cmdCDown.flags = .maskCommand
-        cmdCUp.flags = .maskCommand
-        
-        cmdCDown.post(tap: .cghidEventTap)
-        cmdCUp.post(tap: .cghidEventTap)
-        
-        debugLog("  ⌨️ Отправлено событие Cmd+C")
-        
-        // 3. Ждем изменения буфера обмена с оптимизированным ожиданием
-        guard PasteboardHelper.waitForPasteboardChange(originalCount: originalChangeCount, timeout: 0.3) else {
-            debugLog("  ❌ Буфер обмена не изменился в течение таймаута")
-            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-            return nil
-        }
-        
-        // 5. Читаем новый текст
-        guard let newText = pasteboard.string(forType: .string), !newText.isEmpty else {
-            debugLog("  ❌ Не удалось прочитать текст из буфера обмена")
-            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-            return nil
-        }
-        
-        debugLog("  ✅ Текст получен через NSPasteboard: '\(newText)'")
-        
-        // 6. Восстанавливаем оригинальный буфер обмена
-        restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-        
-        return newText
-    }
-    
-    private func restorePasteboard(originalContent: String?, originalChangeCount: Int) {
-        let pasteboard = NSPasteboard.general
-        
-        // Восстанавливаем только если содержимое действительно изменилось
-        if let original = originalContent {
+        // Отложенное восстановление буфера (fix для Electron apps)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             pasteboard.clearContents()
-            pasteboard.setString(original, forType: .string)
-            debugLog("  🔄 Буфер обмена восстановлен")
-        } else {
-            // Если оригинального содержимого не было, просто очищаем
-            if pasteboard.changeCount != originalChangeCount {
-                pasteboard.clearContents()
-                debugLog("  🔄 Буфер обмена очищен")
-            }
+            pasteboard.writeObjects(oldItems)
         }
     }
     
-    // MARK: - Text Replacement
-    private func replaceSelectedText(with newText: String) -> Bool {
-        debugLog("📝 === НАЧАЛО ЗАМЕНЫ ТЕКСТА: '\(newText)' ===")
-        
-        // Метод 1: Попытка заменить через Accessibility API (резервный)
-        debugLog("🔍 Метод 1: Accessibility API")
-        if replaceTextViaAccessibility(newText) {
-            debugLog("✅ Метод 1 ЗАМЕНЫ УСПЕШЕН")
-            return true
+    /// Отправляет простое нажатие клавиши (БЕЗ модификаторов)
+    /// КРИТИЧЕСКИ ВАЖНО: Очищаем флаги, чтобы не было Cmd+Backspace
+    private func sendKey(_ keyCode: CGKeyCode) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            return
         }
         
-        // Метод 2: Попытка заменить через улучшенную логику (наиболее надежный)
-        debugLog("🔍 Метод 2: Улучшенная логика с AppleScript")
-        if replaceTextWithImprovedLogic(newText) {
-            debugLog("✅ Метод 2 ЗАМЕНЫ УСПЕШЕН")
-            return true
+        // ВАЖНО: Очищаем флаги, чтобы не было Cmd+Backspace от хоткея
+        down.flags = []
+        up.flags = []
+        
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+    
+    /// Отправляет клавишу с модификатором Control
+    private func sendCtrlKey(_ keyCode: CGKeyCode) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            return
         }
         
-        debugLog("❌ === ВСЕ МЕТОДЫ ЗАМЕНЫ ТЕКСТА ПРОВАЛЕНЫ ===")
-        return false
+        // Только Control, остальные модификаторы сбрасываем
+        down.flags = .maskControl
+        up.flags = .maskControl
+        
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
     }
     
     private func switchToNextLayout() {
-        debugLog("🔄 Переключаем на следующую раскладку клавиатуры...")
         keyboardLayoutManager.switchToNextLayout()
     }
     
-    private func replaceTextWithImprovedLogic(_ newText: String) -> Bool {
-        debugLog("  🔍 Выполняем замену текста через CGEvent и NSPasteboard...")
-        
-        return replaceTextViaPasteboard(newText)
+    // MARK: - Standard Application Logic
+    
+    private func attemptAccessibilityStrategy() {
+        if let selectedText = getSelectedText() {
+            // Очищаем от возможного терминального мусора (на всякий случай)
+            let cleanText = cleanTerminalInput(selectedText)
+            let transformed = textTransformer.transformText(cleanText)
+            if transformed == cleanText { return }
+            
+            if replaceTextViaAccessibility(transformed) {
+                switchToNextLayout()
+            } else {
+                replaceTextViaPasteboardStrategy(transformed)
+                switchToNextLayout()
+            }
+        } else {
+            processViaClipboardStrategy()
+        }
     }
     
-    private func replaceTextViaPasteboard(_ newText: String) -> Bool {
-        let pasteboard = NSPasteboard.general
+    private func processViaClipboardStrategy() {
+        do {
+            guard let text = try getSelectedTextViaHotkeys() else { return }
+            // Очищаем от возможного терминального мусора (на всякий случай)
+            let cleanText = cleanTerminalInput(text)
+            let transformed = textTransformer.transformText(cleanText)
+            if transformed == cleanText { return }
+            replaceTextViaPasteboardStrategy(transformed)
+            switchToNextLayout()
+        } catch { }
+    }
+    
+    /// Универсальная очистка текста от терминального "мусора"
+    /// Может использоваться для любого текста, не только из терминалов
+    /// Удаляет: левый промпт (ζ, $, %, etc), правый промпт ([git], время, etc)
+    private func cleanTerminalInput(_ text: String) -> String {
+        var clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // 1. Сохраняем текущее состояние буфера обмена
-        let originalChangeCount = pasteboard.changeCount
-        var originalContent: String? = nil
-        if let originalString = pasteboard.string(forType: .string) {
-            originalContent = originalString
+        // Если текст короткий и не содержит специальных символов - не трогаем
+        if clean.count < 3 || (!clean.contains("$") && !clean.contains("%") && 
+                                !clean.contains("ζ") && !clean.contains("➜") && 
+                                !clean.contains("[") && !clean.contains("(")) {
+            return clean
         }
         
-        debugLog("  📋 Сохранен оригинальный буфер обмена (changeCount: \(originalChangeCount))")
-        
-        // 2. Помещаем новый текст в буфер обмена
-        pasteboard.clearContents()
-        pasteboard.setString(newText, forType: .string)
-        
-        // 3. Ждем, пока буфер обмена обновится с оптимизированным ожиданием
-        guard PasteboardHelper.waitForPasteboardChange(originalCount: originalChangeCount, timeout: 0.3) else {
-            debugLog("  ❌ Буфер обмена не обновился в течение таймаута")
-            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-            return false
+        // ШАГ 1: Удаляем ЛЕВЫЙ промпт
+        // Паттерн: всё до последнего вхождения промпта ($, %, >, #, ζ, ➜, ❯)
+        let leftPromptPattern = "^.*?[ζ$%>#➜❯]\\s+"
+        if let range = clean.range(of: leftPromptPattern, options: .regularExpression) {
+            clean.removeSubrange(range)
         }
         
-        // 4. Проверяем, что текст действительно установлен
-        guard let pasteboardText = pasteboard.string(forType: .string),
-              pasteboardText == newText else {
-            debugLog("  ❌ Не удалось установить текст в буфер обмена")
-            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-            return false
+        // ШАГ 2: Удаляем ПРАВЫЙ промпт
+        // Паттерн: 2+ пробела перед блоком в скобках [] () <> или временем HH:MM:SS
+        let rightPromptPattern = "\\s{2,}(\\[.*?\\]|\\(.*?\\)|<.*?>|\\d{2}:\\d{2}(:\\d{2})?|[✔✘]).*?$"
+        if let range = clean.range(of: rightPromptPattern, options: .regularExpression) {
+            clean.removeSubrange(range)
         }
         
-        debugLog("  📋 Текст установлен в буфер обмена")
+        // ШАГ 3: Финальная очистка
+        clean = clean.trimmingCharacters(in: .whitespaces)
         
-        // 5. Симулируем Cmd+V для вставки
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
-              let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
-            debugLog("  ❌ Не удалось создать события клавиатуры")
-            restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-            return false
+        return clean.isEmpty ? text : clean
+    }
+    
+    private func getAXAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        var result: CFTypeRef?
+        AXUIElementSetMessagingTimeout(element, 0.1)
+        let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
+        return error == .success ? result : nil
+    }
+    
+    private func getSelectedText() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        guard let focused = getAXAttribute(element, kAXFocusedUIElementAttribute as String) as! AXUIElement? else { return nil }
+        
+        if let text = getAXAttribute(focused, kAXSelectedTextAttribute as String) as? String, !text.isEmpty {
+            return text
         }
-        
-        cmdVDown.flags = .maskCommand
-        cmdVUp.flags = .maskCommand
-        
-        cmdVDown.post(tap: .cghidEventTap)
-        cmdVUp.post(tap: .cghidEventTap)
-        
-        debugLog("  ⌨️ Отправлено событие Cmd+V")
-        
-        // 6. Небольшая задержка после вставки
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
-        
-        // 7. Восстанавливаем оригинальный буфер обмена
-        restorePasteboard(originalContent: originalContent, originalChangeCount: originalChangeCount)
-        
-        debugLog("  ✅ Замена текста выполнена успешно")
-        return true
+        return nil
     }
     
     private func replaceTextViaAccessibility(_ newText: String) -> Bool {
-        debugLog("  🔍 Попытка замены через Accessibility API...")
-        
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            debugLog("  ❌ Не удалось получить активное приложение")
-            return false
-        }
-        
-        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
-        
-        // Получаем фокусный элемент с таймаутом
-        guard let focusedElementRef = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) else {
-            debugLog("  ❌ Не удалось получить фокусный элемент")
-            return false
-        }
-        let focusedElement = focusedElementRef as! AXUIElement
-        
-        debugLog("  ✅ Фокусный элемент получен")
-        
-        // Пытаемся получить текущий текст для проверки
-        guard let currentText = getAXAttribute(focusedElement, kAXValueAttribute as String) as? String else {
-            debugLog("  ❌ Не удалось получить текущий текст")
-            return false
-        }
-        
-        debugLog("  📋 Текущий текст элемента: '\(currentText)'")
-        
-        // Пытаемся получить выделенный текст
-        guard let selectedText = getAXAttribute(focusedElement, kAXSelectedTextAttribute as String) as? String, !selectedText.isEmpty else {
-            debugLog("  ❌ Выделенный текст не найден или пуст")
-            return false
-        }
-        
-        debugLog("  📋 Выделенный текст: '\(selectedText)'")
-        
-        // Заменяем выделенный текст на новый
-        AXUIElementSetMessagingTimeout(focusedElement, 0.1)
-        let setResult = AXUIElementSetAttributeValue(focusedElement, kAXSelectedTextAttribute as CFString, newText as CFString)
-        
-        debugLog("  📋 Результат установки нового текста: \(setResult)")
-        
-        // Проверяем, что замена действительно произошла
-        if setResult == .success {
-            // Проверяем результат замены
-            guard let newCurrentText = getAXAttribute(focusedElement, kAXValueAttribute as String) as? String else {
-                debugLog("  ❌ Не удалось проверить результат замены")
-                return false
-            }
-            
-            debugLog("  📋 Текст после замены: '\(newCurrentText)'")
-            
-            // Проверяем, что текст действительно изменился
-            if newCurrentText != currentText {
-                debugLog("  ✅ Выделенный текст успешно заменен через Accessibility API")
-                return true
-            } else {
-                debugLog("  ❌ Текст не изменился после попытки замены")
-                return false
-            }
-        } else {
-            debugLog("  ❌ Не удалось установить новый текст (результат: \(setResult))")
-            return false
-        }
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        guard let focused = getAXAttribute(element, kAXFocusedUIElementAttribute as String) as! AXUIElement? else { return false }
+        return AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, newText as CFString) == .success
     }
-} 
+    
+    private func getSelectedTextViaHotkeys() throws -> String? {
+        let pasteboard = NSPasteboard.general
+        let oldCount = pasteboard.changeCount
+        
+        let source = CGEventSource(stateID: .hidSystemState)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: false)
+        down?.flags = .maskCommand
+        up?.flags = .maskCommand
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+        
+        var attempts = 0
+        while pasteboard.changeCount == oldCount && attempts < 10 {
+            usleep(20000) // 20ms
+            attempts += 1
+        }
+        
+        return pasteboard.changeCount == oldCount ? nil : pasteboard.string(forType: .string)
+    }
+}

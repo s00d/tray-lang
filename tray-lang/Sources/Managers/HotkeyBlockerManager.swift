@@ -20,8 +20,9 @@ class HotkeyBlockerManager: ObservableObject {
     
     private var eventTap: CFMachPort?
     
-    private var keyDownEventTap: CFMachPort?
-    private var keyUpEventTap: CFMachPort?
+    // Используются в callback функциях, поэтому не могут быть private
+    var keyDownEventTap: CFMachPort?
+    var keyUpEventTap: CFMachPort?
     private var keyDownRunLoopSource: CFRunLoopSource?
     private var keyUpRunLoopSource: CFRunLoopSource?
     
@@ -315,6 +316,13 @@ class HotkeyBlockerManager: ObservableObject {
         
         debugLog("  ❌ Not Q or W key, passing through")
         return Unmanaged.passUnretained(event)
+    }
+    
+    // Обработка отключения Event Tap системой (используется в callback, не может быть private)
+    func handleTapDisabled(type: CGEventType, tap: CFMachPort) {
+        debugLog("⚠️ HotkeyBlocker: Event Tap disabled by system (type: \(type.rawValue)). Attempting to re-enable...")
+        CGEvent.tapEnable(tap: tap, enable: true)
+        debugLog("🔄 HotkeyBlocker: Event Tap re-enabled")
     }
     
     // Обработчик смены приложения (работает в фоне)
@@ -663,6 +671,14 @@ private func keyDownCallback(proxy: CGEventTapProxy, type: CGEventType, event: C
     guard let ptr = ptr else { return Unmanaged.passUnretained(event) }
     let manager = Unmanaged<HotkeyBlockerManager>.fromOpaque(ptr).takeUnretainedValue()
     
+    // Обрабатываем отключение Event Tap системой
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        if let tap = manager.keyDownEventTap {
+            manager.handleTapDisabled(type: type, tap: tap)
+        }
+        return nil
+    }
+    
     if let result = manager.handleKeyDown(event) {
         return result
     } else {
@@ -673,6 +689,14 @@ private func keyDownCallback(proxy: CGEventTapProxy, type: CGEventType, event: C
 private func keyUpCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, ptr: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let ptr = ptr else { return Unmanaged.passUnretained(event) }
     let manager = Unmanaged<HotkeyBlockerManager>.fromOpaque(ptr).takeUnretainedValue()
+    
+    // Обрабатываем отключение Event Tap системой
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        if let tap = manager.keyUpEventTap {
+            manager.handleTapDisabled(type: type, tap: tap)
+        }
+        return nil
+    }
     
     if let result = manager.handleKeyUp(event) {
         return result

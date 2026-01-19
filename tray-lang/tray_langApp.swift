@@ -64,8 +64,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Принудительно проверяем состояние, когда окно становится активным
-        coordinator?.updateUIState()
+        // УЛУЧШЕНО: updateUIState() больше не нужен
+        // AccessibilityManager автоматически мониторит состояние через Combine
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
