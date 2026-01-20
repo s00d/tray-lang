@@ -33,9 +33,12 @@ class KeyboardLayoutManager: ObservableObject {
     func updateCurrentLayout() {
         let newLayout = getCurrentSystemLayout()
         if newLayout != currentLayout {
-            currentLayout = newLayout
-            if let layout = newLayout {
-                print("[KeyboardLayoutManager] Layout changed to: \(layout.localizedName) (\(layout.shortName))")
+            // КРИТИЧНО: @Published обновляется только в main thread
+            DispatchQueue.main.async { [weak self] in
+                self?.currentLayout = newLayout
+                if let layout = newLayout {
+                    print("[KeyboardLayoutManager] Layout changed to: \(layout.localizedName) (\(layout.shortName))")
+                }
             }
         }
     }
@@ -55,8 +58,11 @@ class KeyboardLayoutManager: ObservableObject {
         if let inputSource = getInputSource(for: nextLayout.id) {
             let result = TISSelectInputSource(inputSource)
             if result == noErr {
-                currentLayout = nextLayout
-                print("[KeyboardLayoutManager] Successfully switched to '\(nextLayout.localizedName)'")
+                // КРИТИЧНО: @Published обновляется только в main thread
+                DispatchQueue.main.async { [weak self] in
+                    self?.currentLayout = nextLayout
+                    print("[KeyboardLayoutManager] Successfully switched to '\(nextLayout.localizedName)'")
+                }
             } else {
                 print("[KeyboardLayoutManager] Failed to switch to '\(nextLayout.localizedName)', error: \(result)")
             }
