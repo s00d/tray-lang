@@ -213,13 +213,18 @@ class TextProcessingManager: ObservableObject {
                     debugLog("⚠️ Verification FAILED: AX lied, text not replaced")
                     debugLog("   Expected: '\(transformed.prefix(20))...'")
                     debugLog("   Got:      '\(verifiedText.prefix(20))...'")
+                    debugLog("📋 Falling back to Pasteboard strategy")
                 } else {
-                    debugLog("⚠️ Verification impossible: can't read text back")
+                    // ВАЖНО: Если не можем прочитать ПОСЛЕ замены, но AX вернул success,
+                    // значит скорее всего замена сработала и выделение снялось (нативные приложения).
+                    // Chromium-браузеры всегда дают читать выделение, даже если не заменили.
+                    debugLog("🔍 Can't read text back - selection likely cleared after successful replace")
+                    debugLog("✅ Assuming AX replace succeeded (native app behavior)")
+                    switchToNextLayout()
+                    return
                 }
-                
-                debugLog("📋 Falling back to Pasteboard strategy")
             } else {
-                debugLog("⚠️ AX Replace returned failure")
+                debugLog("⚠️ AX Replace returned failure, using Pasteboard")
             }
         }
         
