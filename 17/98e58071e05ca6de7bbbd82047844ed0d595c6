@@ -1,0 +1,20 @@
+.github/workflows/build.yml
+  s_aada1954fa2a15::t_87f3a364717654 15,20
+  s_aada1954fa2a15::t_abfc4014ed8396 119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1798e58071e05ca6de7bbbd82047844ed0d595c6",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
