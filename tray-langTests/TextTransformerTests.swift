@@ -26,6 +26,23 @@ struct TextTransformerTests {
         #expect(transformer.transformText(mistyped) == url)
     }
 
+    @Test func decodesMistypedReleaseTagURL() {
+        let transformer = russianTransformer()
+        let mistyped = "реезыЖ..пшергиюсщь.ы00в.екфн-дфтп.кудуфыуы.ефп.м1ю43"
+        let expected = "https://github.com/s00d/tray-lang/releases/tag/v1.43"
+
+        #expect(transformer.transformText(mistyped) == expected)
+    }
+
+    @Test func roundTripsReleaseTagURL() {
+        let transformer = russianTransformer()
+        let url = "https://github.com/s00d/tray-lang/releases/tag/v1.43"
+        let mistyped = transformer.transformText(url)
+
+        #expect(mistyped == "реезыЖ..пшергиюсщь.ы00в.екфн-дфтп.кудуфыуы.ефп.м1ю43")
+        #expect(transformer.transformText(mistyped) == url)
+    }
+
     @Test func doesNotTurnSlashesIntoYuOnSecondPass() {
         let transformer = russianTransformer()
         let url = "https://github.com/s00d/tray-lang"

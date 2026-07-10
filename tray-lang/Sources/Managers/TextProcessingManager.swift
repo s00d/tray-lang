@@ -223,7 +223,7 @@ class TextProcessingManager: ObservableObject {
     ) {
         debugLog("📝 Processing text: '\(text.prefix(30))...' (length: \(text.count))")
         
-        let cleanText = cleanTerminalInput(text)
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         debugLog("🧹 After cleanup: '\(cleanText.prefix(30))...' (length: \(cleanText.count))")
         
         let transformed: String
@@ -413,12 +413,6 @@ class TextProcessingManager: ObservableObject {
     
     private func switchToNextLayout() {
         keyboardLayoutManager.switchToNextLayout()
-    }
-    
-    private func cleanTerminalInput(_ text: String) -> String {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if clean.count < 3 && !clean.contains("$") { return clean }
-        return extractCommandFromPrompt(text)
     }
     
     private func getAXAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
