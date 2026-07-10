@@ -1,0 +1,22 @@
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_2c9d6b9086c95e 401,433
+  s_aada1954fa2a15::t_9acb8372d017f3 415,447
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_1f8c1b18fecbb4 20,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "48bd536953d417250cef5e7564f171b88d094991",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
