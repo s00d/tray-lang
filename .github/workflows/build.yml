@@ -12,12 +12,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: '16.2'
+        xcode-version: latest-stable
 
     - name: Clean and prepare
       run: |
@@ -116,7 +116,7 @@ jobs:
           "build/Release/"
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: v${{ env.VERSION }}
         name: Tray Lang v${{ env.VERSION }}
@@ -139,5 +139,3 @@ jobs:
           build/Release/Tray-Lang-v${{ env.VERSION }}-Universal.dmg
         draft: false
         prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
