@@ -1,0 +1,51 @@
+tray-lang/Sources/Core/AccessibilityManager.swift
+  s_aada1954fa2a15::t_c453b41ef2fea1 63-64
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_2c34a8c2125f7a 407,416
+tray-langTests/ConversionProfileTemplateTests.swift
+  s_aada1954fa2a15::t_e360f0fa43e4b7 127
+  s_aada1954fa2a15::t_16d222c0b2208b 133-135
+  s_aada1954fa2a15::t_8c2a20e91a4ff6 140-149
+  s_aada1954fa2a15::t_d2f05cc5a788e9 159-160
+  s_aada1954fa2a15::t_70844366098125 75-77
+  s_aada1954fa2a15::t_050745bec6efbd 60
+  s_aada1954fa2a15::t_349a299afad70b 35,40-44
+  s_aada1954fa2a15::t_5646f071a9888e 1-14,16-29,31-34,36-39,45-59,61-68,70-74,78-96,98-113,115-119,121-126,128-132,136-139,150-158,161-177
+  s_aada1954fa2a15::t_2f1ca6c313b450 69
+  s_aada1954fa2a15::t_8a0fb3f0f30b5e 15
+  s_aada1954fa2a15::t_4b24ed8a1706d1 97
+  s_aada1954fa2a15::t_d3e97b3143abcd 30
+  s_aada1954fa2a15::t_947f9f640b73d3 114
+  s_aada1954fa2a15::t_a345ca7e5c3c5a 120
+tray-lang/Sources/Utils/AppIdentity.swift
+  s_aada1954fa2a15::t_65c01894fd97bb 1-9
+tray-lang/Sources/Core/TextTransformer.swift
+  s_aada1954fa2a15::t_44e209461606b0 24-29
+  s_aada1954fa2a15::t_e849ff6fc38190 53-77,80-82,86,88
+tray-langUITests/SettingsWindowUITests.swift
+  s_aada1954fa2a15::t_76a9e0afa7e91c 5
+  s_aada1954fa2a15::t_48ee37b543cf6f 27-29
+tray-langTests/TextTransformerTests.swift
+  s_aada1954fa2a15::t_6f99a36231668d 16
+  s_aada1954fa2a15::t_dcd163837de673 1-15,17-38
+tray-langTests/SettingsWindowTests.swift
+  s_aada1954fa2a15::t_ed73b02c645896 38-40
+tray-lang/Sources/Components/WindowManager.swift
+  s_aada1954fa2a15::t_8c925d49c087fc 192-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e9a70b48467665462c71bc6d45def2d5ea8b2e87",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
