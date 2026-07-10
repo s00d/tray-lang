@@ -1,0 +1,28 @@
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_cd9a715f70d678 415,448
+  s_aada1954fa2a15::t_e6843e29e44205 401,434
+  s_aada1954fa2a15::t_70a41af3791166 431-432
+.github/workflows/build.yml
+  s_aada1954fa2a15::t_d2d4c1da9b89d7 9-17,31-54,57-59,63-72,76-103,107-110,112-117,119-128,135-138,147-148,157-159,164,168
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_93e7f46d806060 20,22
+README.md
+  s_aada1954fa2a15::t_0649930d4e9c8e 130,132-134,137-138
+  s_aada1954fa2a15::t_84d13c3cae673e 139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a2ee0e830bca5206927541860d7238c90f48b1de",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
