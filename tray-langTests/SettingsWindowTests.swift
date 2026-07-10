@@ -35,7 +35,9 @@ final class SettingsWindowTests: XCTestCase {
 
         let expectation = expectation(description: "settings window appears")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            let settingsWindow = NSApp.windows.first { $0.title == "Tray Lang" }
+            let settingsWindow = NSApp.windows.first {
+                $0.identifier?.rawValue == "tray-lang.settings"
+            }
             XCTAssertNotNil(settingsWindow)
             XCTAssertTrue(settingsWindow?.isVisible == true)
             XCTAssertEqual(NSApp.activationPolicy(), initialPolicy)

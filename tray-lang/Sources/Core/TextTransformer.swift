@@ -21,6 +21,12 @@ class TextTransformer: ObservableObject {
         loadProfiles()
         updateActiveMapping()
     }
+
+    init(profiles: [ConversionProfile], activeProfileID: UUID?) {
+        self.profiles = profiles
+        self.activeProfileID = activeProfileID
+        updateActiveMapping()
+    }
     
     // Получаем текущий активный профиль
     var activeProfile: ConversionProfile? {
@@ -44,25 +50,42 @@ class TextTransformer: ObservableObject {
     }
     
     // MARK: - Text Transformation
+
+    private enum ConversionDirection {
+        case toLatin
+        case toCyrillic
+    }
+
+    private func conversionDirection(for text: String) -> ConversionDirection {
+        var cyrillicCount = 0
+        var latinCount = 0
+
+        for char in text where char.isLetter {
+            if Self.isCyrillicLetter(char) {
+                cyrillicCount += 1
+            } else if char.isASCII {
+                latinCount += 1
+            }
+        }
+
+        return cyrillicCount >= latinCount ? .toLatin : .toCyrillic
+    }
+
+    private static func isCyrillicLetter(_ char: Character) -> Bool {
+        char.unicodeScalars.allSatisfy { (0x0400...0x04FF).contains($0.value) }
+    }
+
     func transformText(_ text: String) -> String {
         guard !toFromMapping.isEmpty, activeProfile != nil else { return text }
-        
+
+        let mapping = conversionDirection(for: text) == .toLatin ? toFromMapping : fromToMapping
+
         var result = ""
         for char in text {
             let charString = String(char)
-            
-            // Сначала пробуем конвертировать через активный профиль
-            if let mapped = activeProfile?.mapping[charString] {
-                result += mapped
-            } else if let mapped = toFromMapping[charString] {
-                // Если не нашли в активном профиле, пробуем обратный маппинг
-                result += mapped
-            } else {
-                // Если нет в маппинге - оставляем как есть
-                result += charString
-            }
+            result += mapping[charString] ?? charString
         }
-        
+
         return result
     }
     

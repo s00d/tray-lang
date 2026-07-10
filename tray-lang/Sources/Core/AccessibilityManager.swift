@@ -60,7 +60,8 @@ class AccessibilityManager: ObservableObject {
     private func showGoToSettingsAlert() {
         let alert = NSAlert()
         alert.messageText = "Accessibility Permissions Required"
-        alert.informativeText = "Tray Lang needs accessibility permissions to perform text conversion and handle hotkeys.\n\nPlease enable Tray Lang in System Settings > Privacy & Security > Accessibility."
+        let appName = AppIdentity.displayName
+        alert.informativeText = "\(appName) needs accessibility permissions to perform text conversion and handle hotkeys.\n\nPlease enable \(appName) in System Settings > Privacy & Security > Accessibility."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Later")

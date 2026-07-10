@@ -189,7 +189,8 @@ final class WindowManager: NSObject, NSMenuDelegate {
             backing: .buffered,
             defer: true
         )
-        window.title = "Tray Lang"
+        window.title = AppIdentity.displayName
+        window.identifier = NSUserInterfaceItemIdentifier("tray-lang.settings")
         window.delegate = self
         window.contentViewController = hostingController
         window.setContentSize(NSSize(width: 800, height: 500))

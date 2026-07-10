@@ -2,7 +2,7 @@ import XCTest
 
 final class SettingsWindowUITests: XCTestCase {
 
-    private let bundleIdentifier = "os.s00d.tray-lang"
+    private let bundleIdentifier = "os.s00d.tray-lang.debug"
 
     override func tearDownWithError() throws {
         let app = XCUIApplication(bundleIdentifier: bundleIdentifier)
@@ -24,7 +24,9 @@ final class SettingsWindowUITests: XCTestCase {
         app.launchArguments = ["-openSettings"]
         app.launch()
 
-        let settingsWindow = app.windows["Tray Lang"]
+        let settingsWindow = app.windows.matching(
+            NSPredicate(format: "identifier == %@", "tray-lang.settings")
+        ).firstMatch
         XCTAssertTrue(settingsWindow.waitForExistence(timeout: 10))
 
         XCTAssertTrue(app.staticTexts["General"].waitForExistence(timeout: 5))
