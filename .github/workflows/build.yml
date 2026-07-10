@@ -6,6 +6,15 @@ on:
 permissions:
   contents: write
 
+env:
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  DERIVED_DATA_INTEL: ${{ github.workspace }}/build/DerivedData-intel
+  DERIVED_DATA_ARM64: ${{ github.workspace }}/build/DerivedData-arm64
+  APP_OUTPUT_DIR: ${{ github.workspace }}/build/Release
+  UNSIGNED_INTEL_APP: ${{ github.workspace }}/build/Release/tray-lang-intel.app
+  UNSIGNED_ARM64_APP: ${{ github.workspace }}/build/Release/tray-lang-arm64.app
+  UNIVERSAL_APP: ${{ github.workspace }}/build/Release/tray-lang-universal.app
+
 jobs:
   build:
     runs-on: macos-15
@@ -19,91 +28,114 @@ jobs:
       with:
         xcode-version: latest-stable
 
+    - name: Get version from project
+      run: |
+        VERSION=$(xcodebuild -project tray-lang.xcodeproj -showBuildSettings -configuration Release | awk -F' = ' '/MARKETING_VERSION/{print $2; exit}')
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        echo "Building version: $VERSION"
+
+    - name: Install signing certificate
+      env:
+        BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+        P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      run: |
+        CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+        KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+        echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+        security list-keychain -d user -s "$KEYCHAIN_PATH"
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
     - name: Clean and prepare
       run: |
-        echo "Current directory structure:"
-        ls -la
-        echo "Looking for Xcode project:"
-        find . -name "*.xcodeproj" -type d
-        echo "Cleaning project..."
-        xcodebuild clean -project tray-lang.xcodeproj -scheme tray-lang
-        echo "Project structure:"
-        ls -la tray-lang/
+        rm -rf build
+        mkdir -p "$APP_OUTPUT_DIR"
+        xcodebuild clean -project tray-lang.xcodeproj -scheme tray-lang -configuration Release
 
     - name: Build for Intel
       run: |
-        echo "Building for Intel architecture..."
-        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=x86_64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-        mkdir -p build/Release
-        echo "Looking for built app..."
-        find . -name "tray-lang.app" -type d
-        find ~/Library/Developer/Xcode/DerivedData -name "tray-lang.app" -type d
-        APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "tray-lang.app" -type d | head -1)
-        echo "Found app at: $APP_PATH"
-        if [ -n "$APP_PATH" ]; then
-          cp -r "$APP_PATH" build/Release/tray-lang-intel.app
-          echo "Copied to build/Release/tray-lang-intel.app"
-        else
-          echo "ERROR: Could not find tray-lang.app"
-          exit 1
-        fi
-        echo "Intel build completed"
+        xcodebuild \
+          -project tray-lang.xcodeproj \
+          -scheme tray-lang \
+          -configuration Release \
+          -destination 'platform=macOS,arch=x86_64' \
+          -derivedDataPath "$DERIVED_DATA_INTEL" \
+          build \
+          CODE_SIGNING_ALLOWED=NO
+
+        cp -R "$DERIVED_DATA_INTEL/Build/Products/Release/tray-lang.app" "$UNSIGNED_INTEL_APP"
 
     - name: Build for Apple Silicon
       run: |
-        echo "Building for Apple Silicon architecture..."
-        xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -destination 'platform=macOS,arch=arm64' build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-        mkdir -p build/Release
-        echo "Looking for built app..."
-        find . -name "tray-lang.app" -type d
-        find ~/Library/Developer/Xcode/DerivedData -name "tray-lang.app" -type d
-        APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "tray-lang.app" -type d | head -1)
-        echo "Found app at: $APP_PATH"
-        if [ -n "$APP_PATH" ]; then
-          cp -r "$APP_PATH" build/Release/tray-lang-arm64.app
-          echo "Copied to build/Release/tray-lang-arm64.app"
-        else
-          echo "ERROR: Could not find tray-lang.app"
+        xcodebuild \
+          -project tray-lang.xcodeproj \
+          -scheme tray-lang \
+          -configuration Release \
+          -destination 'platform=macOS,arch=arm64' \
+          -derivedDataPath "$DERIVED_DATA_ARM64" \
+          build \
+          CODE_SIGNING_ALLOWED=NO
+
+        cp -R "$DERIVED_DATA_ARM64/Build/Products/Release/tray-lang.app" "$UNSIGNED_ARM64_APP"
+
+    - name: Create universal app
+      run: |
+        lipo -create \
+          "$UNSIGNED_INTEL_APP/Contents/MacOS/tray-lang" \
+          "$UNSIGNED_ARM64_APP/Contents/MacOS/tray-lang" \
+          -output "$APP_OUTPUT_DIR/tray-lang-universal-binary"
+
+        cp -R "$UNSIGNED_INTEL_APP" "$UNIVERSAL_APP"
+        cp "$APP_OUTPUT_DIR/tray-lang-universal-binary" "$UNIVERSAL_APP/Contents/MacOS/tray-lang"
+        chmod +x "$UNIVERSAL_APP/Contents/MacOS/tray-lang"
+        rm -f "$APP_OUTPUT_DIR/tray-lang-universal-binary"
+
+    - name: Sign app
+      run: |
+        SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | awk -F'"' '/Developer ID Application/{print $2; exit}')
+        if [ -z "$SIGNING_IDENTITY" ]; then
+          echo "Developer ID Application identity not found in CI keychain"
           exit 1
         fi
-        echo "Apple Silicon build completed"
 
-    - name: Create Universal Binary
-      run: |
-        # Create universal binary using lipo
-        lipo -create build/Release/tray-lang-intel.app/Contents/MacOS/tray-lang build/Release/tray-lang-arm64.app/Contents/MacOS/tray-lang -output build/Release/tray-lang-universal
-        
-        # Copy the universal binary to the Intel app
-        cp build/Release/tray-lang-universal build/Release/tray-lang-intel.app/Contents/MacOS/tray-lang
-        
-        # Create final universal app
-        cp -r build/Release/tray-lang-intel.app build/Release/tray-lang-universal.app
-        
-        # List build artifacts
-        ls -la build/Release/
+        codesign --force --deep --options runtime \
+          --entitlements tray-lang/tray_lang.entitlements \
+          --sign "$SIGNING_IDENTITY" \
+          "$UNIVERSAL_APP"
 
-    - name: Get version from project
+        codesign --verify --deep --strict --verbose=2 "$UNIVERSAL_APP"
+
+    - name: Notarize app
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       run: |
-        VERSION=$(xcodebuild -project tray-lang.xcodeproj -showBuildSettings | grep "MARKETING_VERSION" | awk '{print $3}')
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "Building version: $VERSION"
+        ditto -c -k --keepParent "$UNIVERSAL_APP" "$APP_OUTPUT_DIR/tray-lang-notarize.zip"
+
+        xcrun notarytool submit "$APP_OUTPUT_DIR/tray-lang-notarize.zip" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --wait
+
+        xcrun stapler staple "$UNIVERSAL_APP"
+        spctl -a -vv --type execute "$UNIVERSAL_APP"
 
     - name: Create DMG
       run: |
-        # Install create-dmg if not available
         if ! command -v create-dmg &> /dev/null; then
           brew install create-dmg
         fi
-        
-        # Clean build directory and keep only what we need
-        rm -rf build/Release/tray-lang-intel.app
-        rm -rf build/Release/tray-lang-arm64.app
-        rm -f build/Release/tray-lang-universal
-        
-        # Copy README to build directory
-        cp README.md build/Release/
-        
-        # Create DMG with app and README only
+
+        rm -rf "$UNSIGNED_INTEL_APP" "$UNSIGNED_ARM64_APP"
+        cp README.md "$APP_OUTPUT_DIR/"
+
         create-dmg \
           --volname "Tray Lang v$VERSION" \
           --window-pos 200 120 \
@@ -112,8 +144,8 @@ jobs:
           --icon "tray-lang-universal.app" 175 120 \
           --hide-extension "tray-lang-universal.app" \
           --app-drop-link 175 300 \
-          "build/Release/Tray-Lang-v$VERSION-Universal.dmg" \
-          "build/Release/"
+          "$APP_OUTPUT_DIR/Tray-Lang-v$VERSION-Universal.dmg" \
+          "$APP_OUTPUT_DIR/"
 
     - name: Create Release
       uses: softprops/action-gh-release@v3
@@ -122,16 +154,18 @@ jobs:
         name: Tray Lang v${{ env.VERSION }}
         body: |
           ## Tray Lang v${{ env.VERSION }}
-          
+
+          Signed and notarized universal build.
+
           ### Installation
           1. Download and mount the DMG
           2. Move the app to Applications folder
           3. Grant accessibility permissions on first launch
-          
+
           ### Files Included
           - `tray-lang-universal.app` - Universal macOS application
           - `README.md` - Installation and usage instructions
-          
+
           ### System Requirements
           - macOS 15.0 or higher
           - Intel or Apple Silicon Mac

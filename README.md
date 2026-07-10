@@ -127,12 +127,15 @@ cd tray-lang
 make build
 ```
 
-### Signing (if needed)
+### Signing (local Release build)
 ```bash
-chmod +x /Applications/tray-lang-universal.app
-xattr -cr /Applications/tray-lang-universal.app
-codesign --force --deep --sign - /Applications/tray-lang-universal.app
+# Requires "Developer ID Application" in Keychain
+make build
+codesign --verify --deep --strict --verbose=2 build/Release/tray-lang.app
 ```
+
+CI release builds are signed and notarized automatically via GitHub Actions secrets:
+`BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, `KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
 
 ## Troubleshooting
 
