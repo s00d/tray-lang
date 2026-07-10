@@ -1,0 +1,29 @@
+tray-lang/Sources/Managers/TextProcessingManager.swift
+  s_aada1954fa2a15::t_0ec8d92c1bd298 226
+tray-langTests/TextTransformerTests.swift
+  s_aada1954fa2a15::t_619d2cd808f5bb 34-36,38,40-41,43-44
+  s_aada1954fa2a15::t_ba4589c6d37650 45
+  s_aada1954fa2a15::t_c126ced2bb8582 29-32,37,39,42
+  s_aada1954fa2a15::t_b97bef7be187ad 33
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_113e1f9f681d87 415,448
+  s_aada1954fa2a15::t_34caec9113c1c1 401,434
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_7f17037d939c0c 20,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d52fc7cbade5a642ad357b5c1ae81d80ff6a87d6",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
