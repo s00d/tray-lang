@@ -129,23 +129,26 @@ jobs:
 
     - name: Create DMG
       run: |
-        if ! command -v create-dmg &> /dev/null; then
-          brew install create-dmg
-        fi
-
         rm -rf "$UNSIGNED_INTEL_APP" "$UNSIGNED_ARM64_APP"
-        cp README.md "$APP_OUTPUT_DIR/"
 
-        create-dmg \
-          --volname "Tray Lang v$VERSION" \
-          --window-pos 200 120 \
-          --window-size 800 500 \
-          --icon-size 100 \
-          --icon "tray-lang-universal.app" 175 120 \
-          --hide-extension "tray-lang-universal.app" \
-          --app-drop-link 175 300 \
-          "$APP_OUTPUT_DIR/Tray-Lang-v$VERSION-Universal.dmg" \
-          "$APP_OUTPUT_DIR/"
+        DMG_STAGING="$APP_OUTPUT_DIR/dmg-staging"
+        DMG_PATH="$APP_OUTPUT_DIR/Tray-Lang-v$VERSION-Universal.dmg"
+
+        rm -rf "$DMG_STAGING" "$DMG_PATH"
+        mkdir -p "$DMG_STAGING"
+        cp -R "$UNIVERSAL_APP" "$DMG_STAGING/"
+        cp README.md "$DMG_STAGING/"
+        ln -s /Applications "$DMG_STAGING/Applications"
+
+        hdiutil create \
+          -volname "Tray Lang v$VERSION" \
+          -srcfolder "$DMG_STAGING" \
+          -ov \
+          -format UDZO \
+          "$DMG_PATH"
+
+        rm -rf "$DMG_STAGING"
+        ls -la "$APP_OUTPUT_DIR"
 
     - name: Create Release
       uses: softprops/action-gh-release@v3
