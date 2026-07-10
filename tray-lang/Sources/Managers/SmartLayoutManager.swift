@@ -26,7 +26,7 @@ class SmartLayoutManager: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
             // Сохраняем любое изменение в UserDefaults для персистентности
-            UserDefaults.standard.set(isEnabled, forKey: "smartLayoutEnabled")
+            UserDefaults.standard.set(isEnabled, forKey: DefaultsKeys.smartLayoutEnabled)
             // Включаем или выключаем мониторинг в зависимости от состояния
             if isEnabled {
                 startMonitoring()
@@ -54,14 +54,14 @@ class SmartLayoutManager: ObservableObject {
     private var needsSave = false
     
     // Ключи для UserDefaults
-    private let rulesUserDefaultsKey = "smartLayoutRules"
-    private let rememberedUserDefaultsKey = "rememberedAppLayouts"
+    private let rulesUserDefaultsKey = DefaultsKeys.smartLayoutRules
+    private let rememberedUserDefaultsKey = DefaultsKeys.rememberedAppLayouts
     
     init(keyboardLayoutManager: KeyboardLayoutManager) {
         self.keyboardLayoutManager = keyboardLayoutManager
         
         // Читаем сохраненное значение. Если его нет, по умолчанию будет `false`
-        self.isEnabled = UserDefaults.standard.bool(forKey: "smartLayoutEnabled")
+        self.isEnabled = UserDefaults.standard.bool(forKey: DefaultsKeys.smartLayoutEnabled)
         
         loadRules()
         loadRememberedLayouts() // Этот метод теперь будет вызывать обновление UI
@@ -230,16 +230,5 @@ class SmartLayoutManager: ObservableObject {
         
         // Сортируем для стабильного отображения
         self.publishedRememberedLayouts = newPublished.sorted { $0.appName < $1.appName }
-    }
-}
-
-// Добавьте это расширение в конец файла для удобства
-extension NSWorkspace {
-    func applicationName(for bundleIdentifier: String) -> String {
-        if let url = self.urlForApplication(withBundleIdentifier: bundleIdentifier),
-           let bundle = Bundle(url: url) {
-            return bundle.localizedInfoDictionary?["CFBundleName"] as? String ?? bundle.infoDictionary?["CFBundleName"] as? String ?? bundleIdentifier
-        }
-        return bundleIdentifier
     }
 }

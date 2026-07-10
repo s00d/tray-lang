@@ -2,89 +2,136 @@ import Foundation
 import AppKit
 import ApplicationServices
 
+enum ProcessingAction {
+    case changeLayout
+    case fixSpelling
+}
+
 class TextProcessingManager: ObservableObject {
+    private struct ClipboardSnapshot {
+        let items: [NSPasteboardItem]
+        let changeCount: Int
+    }
+    
     private let textTransformer: TextTransformer
     private let keyboardLayoutManager: KeyboardLayoutManager
+    private let spellCheckManager: SpellCheckManager
+    
+    private var isProcessing = false
     
     // Список терминалов
     private let terminalBundleIDs = [
-        "com.apple.Terminal",           // Apple Terminal
-        "com.googlecode.iterm2",        // iTerm2
-        "co.zeit.hyper",                // Hyper
-        "org.alacritty",                // Alacritty
-        "io.alacritty",                 // Alacritty (alt)
-        "net.kovidgoyal.kitty",         // Kitty
-        "dev.warp.Warp-Stable",         // Warp
-        "com.github.wez.wezterm",       // WezTerm
-        "com.microsoft.VSCode",         // VS Code (терминал часто имеет тот же bundleID)
-        "com.googlecode.iterm2-nightly" // iTerm2 Nightly
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "co.zeit.hyper",
+        "org.alacritty",
+        "io.alacritty",
+        "net.kovidgoyal.kitty",
+        "dev.warp.Warp-Stable",
+        "com.github.wez.wezterm",
+        "com.microsoft.VSCode",
+        "com.googlecode.iterm2-nightly"
     ]
     
-    init(textTransformer: TextTransformer, keyboardLayoutManager: KeyboardLayoutManager) {
+    init(
+        textTransformer: TextTransformer,
+        keyboardLayoutManager: KeyboardLayoutManager,
+        spellCheckManager: SpellCheckManager
+    ) {
         self.textTransformer = textTransformer
         self.keyboardLayoutManager = keyboardLayoutManager
+        self.spellCheckManager = spellCheckManager
     }
     
     // MARK: - Main Logic
-    func processSelectedText() {
+    
+    func processSelectedText(action: ProcessingAction) {
+        guard !isProcessing else {
+            debugLog("⚠️ Already processing, ignoring duplicate hotkey")
+            return
+        }
+        isProcessing = true
+        
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-              let bundleID = frontmostApp.bundleIdentifier else { return }
-        
-        debugLog("🚀 APP: \(frontmostApp.localizedName ?? "?") | Bundle ID: \(bundleID)")
-        
-        // 1. ЛОГИКА ДЛЯ ТЕРМИНАЛОВ
-        if terminalBundleIDs.contains(bundleID) {
-            handleTerminalProcessing(app: frontmostApp)
+              let bundleID = frontmostApp.bundleIdentifier else {
+            finishProcessing()
             return
         }
         
-        // 2. СТАНДАРТНАЯ ЛОГИКА
-        attemptAccessibilityStrategy()
+        debugLog("🚀 APP: \(frontmostApp.localizedName ?? "?") | Bundle ID: \(bundleID)")
+        
+        // manualDeepCopy reads pasteboard data eagerly; lazy/promised types may not round-trip.
+        let snapshot = captureClipboardSnapshot()
+        
+        if terminalBundleIDs.contains(bundleID) {
+            handleTerminalProcessing(app: frontmostApp, action: action, snapshot: snapshot)
+            return
+        }
+        
+        attemptAccessibilityStrategy(action: action, snapshot: snapshot)
     }
     
     // MARK: - Terminal Logic
     
-    private func handleTerminalProcessing(app: NSRunningApplication) {
+    private func handleTerminalProcessing(
+        app: NSRunningApplication,
+        action: ProcessingAction,
+        snapshot: ClipboardSnapshot
+    ) {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         
-        // Получаем текст через AX API
-        guard let focused = getAXAttribute(appElement, kAXFocusedUIElementAttribute as String) as! AXUIElement?,
+        guard let focused = asAXUIElement(getAXAttribute(appElement, kAXFocusedUIElementAttribute as String)),
               let fullText = getAXAttribute(focused, kAXValueAttribute as String) as? String,
               !fullText.isEmpty else {
             debugLog("❌ Терминал: Не удалось прочитать текст через Accessibility")
+            finishProcessing()
             return
         }
         
         let lines = fullText.components(separatedBy: .newlines)
-        guard let lastLine = lines.reversed().first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else { return }
+        guard let lastLine = lines.reversed().first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else {
+            finishProcessing()
+            return
+        }
         
         let commandText = extractCommandFromPrompt(lastLine)
-        if commandText.isEmpty { return }
+        if commandText.isEmpty {
+            finishProcessing()
+            return
+        }
         
-        let transformedText = textTransformer.transformText(commandText)
-        if transformedText == commandText { return }
+        let transformedText: String
+        switch action {
+        case .changeLayout:
+            transformedText = textTransformer.transformText(commandText)
+        case .fixSpelling:
+            transformedText = spellCheckManager.fixText(commandText)
+        }
+        if transformedText == commandText {
+            finishProcessing()
+            return
+        }
         
         debugLog("🔄 Терминал: '\(commandText)' -> '\(transformedText)'")
         
-        // Очистка и вставка
         clearTerminalLine(length: commandText.count)
-        replaceTextForTerminal(transformedText)
-        switchToNextLayout()
+        replaceTextForTerminal(transformedText, snapshot: snapshot)
+        if action == .changeLayout {
+            switchToNextLayout()
+        }
     }
     
     private func extractCommandFromPrompt(_ line: String) -> String {
         var clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Удаляем левый промпт
         let prompts = ["$ ", "% ", "> ", "# ", "ζ ", ": ", "➜ ", "❯ ", "$", "%", ">", "#", "ζ"]
-        for p in prompts {
-            if let range = clean.range(of: p, options: .backwards) {
+        for prompt in prompts {
+            if let range = clean.range(of: prompt, options: .backwards) {
                 clean = String(clean[range.upperBound...])
                 break
             }
         }
         
-        // Удаляем правый промпт (git, время и т.д.)
         let rightPromptPattern = "\\s{2,}(\\[.*?\\]|\\(.*?\\)|<.*?>|\\d{2}:\\d{2}(:\\d{2})?|[✔✘]).*?$"
         if let range = clean.range(of: rightPromptPattern, options: .regularExpression) {
             clean.removeSubrange(range)
@@ -96,11 +143,9 @@ class TextProcessingManager: ObservableObject {
     
     private func clearTerminalLine(length: Int) {
         let safeLength = min(length, 300)
-        // Ctrl+E (End)
         sendCtrlKey(14)
         usleep(20000)
         
-        // Backspace
         for _ in 0..<(safeLength + 2) {
             sendKey(51)
             usleep(1000)
@@ -110,117 +155,119 @@ class TextProcessingManager: ObservableObject {
     
     // MARK: - Pasteboard Strategies
     
-    /// Вставка для терминалов (без восстановления истории)
-    private func replaceTextForTerminal(_ newText: String) {
+    private func replaceTextForTerminal(_ newText: String, snapshot: ClipboardSnapshot) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(newText, forType: .string)
+        let writtenChangeCount = pasteboard.changeCount
+        
+        waitForModifiersReleased()
         performCmdV()
+        
+        scheduleClipboardRestore(snapshot: snapshot, writtenChangeCount: writtenChangeCount)
     }
     
-    /// Основная стратегия замены с восстановлением буфера
-    private func replaceTextViaPasteboardStrategy(_ newText: String) {
+    private func replaceTextViaPasteboardStrategy(_ newText: String, snapshot: ClipboardSnapshot) {
         let pasteboard = NSPasteboard.general
         
-        // 1. Сохраняем старые данные (deep copy)
-        // Используем пустой массив, если буфер пуст
-        let oldItems = pasteboard.pasteboardItems?.map { $0.manualDeepCopy() } ?? []
-        
-        // 2. Записываем новый текст
         pasteboard.clearContents()
         pasteboard.declareTypes([.string, .init("org.nspasteboard.TransientType")], owner: nil)
         pasteboard.setString(newText, forType: .string)
+        let writtenChangeCount = pasteboard.changeCount
         
-        // 3. Вставка (Cmd+V)
+        waitForModifiersReleased()
         performCmdV()
         
-        // 4. Восстановление буфера
-        // К сожалению, здесь нельзя использовать маркерную стратегию, так как мы не можем "прочитать"
-        // состояние приложения, чтобы узнать, закончило ли оно вставку.
-        // Но так как этап копирования (GET) теперь работает быстро, общий лаг уменьшится.
-        // 0.5 сек обычно достаточно для Electron приложений.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        scheduleClipboardRestore(snapshot: snapshot, writtenChangeCount: writtenChangeCount)
+    }
+    
+    private func scheduleClipboardRestore(snapshot: ClipboardSnapshot, writtenChangeCount: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             debugLog("📋 Restoring clipboard...")
-            pasteboard.clearContents()
-            if !oldItems.isEmpty {
-                pasteboard.writeObjects(oldItems)
-            }
+            self?.restoreClipboard(snapshot, ifUnchangedSince: writtenChangeCount)
+            self?.finishProcessing()
         }
     }
     
     // MARK: - Standard Logic
     
-    private func attemptAccessibilityStrategy() {
-        // 1. Пробуем Accessibility (самый быстрый и надежный метод для нативных приложений)
+    private func attemptAccessibilityStrategy(action: ProcessingAction, snapshot: ClipboardSnapshot) {
         if let selectedText = getSelectedText() {
             debugLog("✅ Text retrieved via Accessibility")
-            processTextAndReplace(selectedText, useAccessibilityReplace: true)
+            processTextAndReplace(selectedText, useAccessibilityReplace: true, action: action, snapshot: snapshot)
             return
         }
         
-        // 2. Если AX не сработал (Chrome, Electron, Java), используем Маркерную Стратегию через буфер
         debugLog("ℹ️ Accessibility failed, trying Marker Strategy via Clipboard")
         
         do {
-            if let text = try getSelectedTextViaMarkerStrategy() {
+            if let text = try getSelectedTextViaMarkerStrategy(snapshot: snapshot) {
                 debugLog("✅ Text retrieved via Marker Strategy")
-                processTextAndReplace(text, useAccessibilityReplace: false)
+                processTextAndReplace(text, useAccessibilityReplace: false, action: action, snapshot: snapshot)
             } else {
                 debugLog("⚠️ No text selected or app blocked Cmd+C")
+                finishProcessing()
             }
         } catch {
             debugLog("❌ Marker Strategy error: \(error)")
+            finishProcessing()
         }
     }
     
-    private func processTextAndReplace(_ text: String, useAccessibilityReplace: Bool) {
+    private func processTextAndReplace(
+        _ text: String,
+        useAccessibilityReplace: Bool,
+        action: ProcessingAction,
+        snapshot: ClipboardSnapshot
+    ) {
         debugLog("📝 Processing text: '\(text.prefix(30))...' (length: \(text.count))")
         
-        // Очистка не нужна для обычного текста, но если вдруг попали в терминал без bundleID
         let cleanText = cleanTerminalInput(text)
         debugLog("🧹 After cleanup: '\(cleanText.prefix(30))...' (length: \(cleanText.count))")
         
-        let transformed = textTransformer.transformText(cleanText)
+        let transformed: String
+        switch action {
+        case .changeLayout:
+            transformed = textTransformer.transformText(cleanText)
+        case .fixSpelling:
+            transformed = spellCheckManager.fixText(cleanText)
+        }
         debugLog("🔄 After transform: '\(transformed.prefix(30))...' (length: \(transformed.count))")
         
         if transformed == cleanText {
             debugLog("ℹ️ Text unchanged after transformation, skipping")
+            finishProcessing()
             return
         }
         
         if useAccessibilityReplace {
-            // Пробуем заменить через AX API
             debugLog("🔧 Attempting Accessibility replace...")
             if replaceTextViaAccessibility(transformed) {
                 debugLog("✅ Accessibility replace returned success")
                 
-                // КРИТИЧНО: Проверяем, действительно ли замена сработала
-                // Chromium-браузеры (Brave, Chrome, Edge) лгут - возвращают success, но не заменяют
-                usleep(20000) // 20ms для обновления
+                usleep(20000)
                 
                 if let verifiedText = getSelectedText() {
                     debugLog("🔍 Verification: got '\(verifiedText.prefix(20))...'")
                     
-                    // Если текст действительно заменился - отлично!
                     if verifiedText == transformed {
                         debugLog("✅ Verification PASSED: text actually replaced")
-                        switchToNextLayout()
+                        if action == .changeLayout {
+                            switchToNextLayout()
+                        }
+                        finishProcessing()
                         return
                     }
                     
-                    // Если текст НЕ заменился - AX API соврало!
                     debugLog("⚠️ Verification FAILED: AX lied, text not replaced")
-                    debugLog("   Expected: '\(transformed.prefix(20))...'")
-                    debugLog("   Got:      '\(verifiedText.prefix(20))...'")
                     debugLog("📋 Falling back to Pasteboard strategy")
                 } else {
-                    // ВАЖНО: Если не можем прочитать ПОСЛЕ замены, но AX вернул success,
-                    // значит скорее всего замена сработала и выделение снялось (нативные приложения).
-                    // Chromium-браузеры всегда дают читать выделение, даже если не заменили.
-                    debugLog("🔍 Can't read text back - selection likely cleared after successful replace")
                     debugLog("✅ Assuming AX replace succeeded (native app behavior)")
-                    switchToNextLayout()
+                    if action == .changeLayout {
+                        switchToNextLayout()
+                    }
+                    finishProcessing()
                     return
                 }
             } else {
@@ -228,75 +275,92 @@ class TextProcessingManager: ObservableObject {
             }
         }
         
-        // Fallback на вставку через буфер
         debugLog("📋 Using Pasteboard strategy...")
-        replaceTextViaPasteboardStrategy(transformed)
-        switchToNextLayout()
+        replaceTextViaPasteboardStrategy(transformed, snapshot: snapshot)
+        if action == .changeLayout {
+            switchToNextLayout()
+        }
     }
     
-    // MARK: - Marker Strategy (The "Magic" Part)
+    // MARK: - Marker Strategy
     
-    /// Получает выделенный текст, используя уникальный маркер.
-    /// 1. Ставит в буфер UUID.
-    /// 2. Жмет Cmd+C.
-    /// 3. Ждет, пока буфер НЕ станет равен UUID.
-    /// Это гарантирует, что приложение обработало нажатие.
-    private func getSelectedTextViaMarkerStrategy() throws -> String? {
+    private func getSelectedTextViaMarkerStrategy(snapshot: ClipboardSnapshot) throws -> String? {
         let pasteboard = NSPasteboard.general
         
-        // 1. Сохраняем текущий буфер, чтобы восстановить его, если выделения НЕТ
-        let oldItems = pasteboard.pasteboardItems?.map { $0.manualDeepCopy() } ?? []
-        
-        // 2. Устанавливаем уникальный маркер
         let marker = UUID().uuidString
         pasteboard.clearContents()
         pasteboard.setString(marker, forType: .string)
+        let markerChangeCount = pasteboard.changeCount
         
         debugLog("🎯 Marker Strategy: Set UUID marker")
         
-        // 3. Отправляем Cmd+C
+        waitForModifiersReleased()
         performCmdC()
         
-        // 4. Активное ожидание изменения содержимого (Polling)
-        // Максимум 50 проверок по 10мс = 0.5 секунды.
-        // Обычно Electron реагирует за 20-50мс.
-        var attempts = 0
-        var capturedText: String? = nil
-        
-        while attempts < 50 {
-            usleep(10000) // 10ms
-            
-            if let currentContent = pasteboard.string(forType: .string) {
-                // Если в буфере что-то есть и это НЕ наш маркер — победа!
-                if currentContent != marker {
-                    capturedText = currentContent
-                    debugLog("🎯 Marker Strategy: Text captured after \(attempts * 10)ms")
-                    break
-                }
-            }
-            
-            attempts += 1
-        }
-        
-        // 5. Если текст так и остался маркером, значит ничего не было выделено
-        if capturedText == nil {
-            debugLog("⚠️ Marker intact after \(attempts * 10)ms. Nothing selected or Copy blocked.")
-            // Восстанавливаем старый буфер, так как мы его затерли маркером зря
-            pasteboard.clearContents()
-            if !oldItems.isEmpty {
-                pasteboard.writeObjects(oldItems)
-            }
+        guard PasteboardHelper.waitForPasteboardChange(originalCount: markerChangeCount, timeout: 0.5) else {
+            debugLog("⚠️ Marker Strategy: pasteboard did not change after Cmd+C")
+            restoreClipboard(snapshot)
             return nil
         }
         
-        return capturedText
+        guard let currentContent = pasteboard.string(forType: .string),
+              currentContent != marker else {
+            debugLog("⚠️ Marker intact after copy. Nothing selected or Copy blocked.")
+            restoreClipboard(snapshot)
+            return nil
+        }
+        
+        debugLog("🎯 Marker Strategy: Text captured")
+        return currentContent
+    }
+    
+    // MARK: - Clipboard Helpers
+    
+    private func captureClipboardSnapshot() -> ClipboardSnapshot {
+        let pasteboard = NSPasteboard.general
+        return ClipboardSnapshot(
+            items: pasteboard.pasteboardItems?.map { $0.manualDeepCopy() } ?? [],
+            changeCount: pasteboard.changeCount
+        )
+    }
+    
+    private func restoreClipboard(_ snapshot: ClipboardSnapshot, ifUnchangedSince changeCount: Int? = nil) {
+        let pasteboard = NSPasteboard.general
+        
+        if let changeCount, pasteboard.changeCount != changeCount {
+            debugLog("📋 Skipping clipboard restore — pasteboard changed externally")
+            return
+        }
+        
+        pasteboard.clearContents()
+        if !snapshot.items.isEmpty {
+            pasteboard.writeObjects(snapshot.items)
+        }
+    }
+    
+    private func finishProcessing() {
+        isProcessing = false
+    }
+    
+    private func waitForModifiersReleased(timeout: TimeInterval = 0.5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+        
+        while Date() < deadline {
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            if flags.isDisjoint(with: modifierMask) {
+                return
+            }
+            usleep(10000)
+        }
     }
     
     // MARK: - Input Simulation
     
     private func performCmdC() {
+        waitForModifiersReleased()
+        
         let source = CGEventSource(stateID: .hidSystemState)
-        // KeyCode 8 is 'C'
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: false) else { return }
         
@@ -304,13 +368,14 @@ class TextProcessingManager: ObservableObject {
         up.flags = .maskCommand
         
         down.post(tap: .cghidEventTap)
-        usleep(5000) // 5ms - микропауза для надежности
+        usleep(5000)
         up.post(tap: .cghidEventTap)
     }
     
     private func performCmdV() {
+        waitForModifiersReleased()
+        
         let source = CGEventSource(stateID: .hidSystemState)
-        // KeyCode 9 is 'V'
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else { return }
         
@@ -318,7 +383,7 @@ class TextProcessingManager: ObservableObject {
         up.flags = .maskCommand
         
         down.post(tap: .cghidEventTap)
-        usleep(5000) // 5ms
+        usleep(5000)
         up.post(tap: .cghidEventTap)
     }
     
@@ -351,9 +416,7 @@ class TextProcessingManager: ObservableObject {
     }
     
     private func cleanTerminalInput(_ text: String) -> String {
-        // Упрощенная версия для стандартного текста
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Базовая защита от случайного срабатывания на коротких строках
         if clean.count < 3 && !clean.contains("$") { return clean }
         return extractCommandFromPrompt(text)
     }
@@ -365,10 +428,15 @@ class TextProcessingManager: ObservableObject {
         return error == .success ? result : nil
     }
     
+    private func asAXUIElement(_ value: CFTypeRef?) -> AXUIElement? {
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+    
     private func getSelectedText() -> String? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let element = AXUIElementCreateApplication(app.processIdentifier)
-        guard let focused = getAXAttribute(element, kAXFocusedUIElementAttribute as String) as! AXUIElement? else { return nil }
+        guard let focused = asAXUIElement(getAXAttribute(element, kAXFocusedUIElementAttribute as String)) else { return nil }
         
         if let text = getAXAttribute(focused, kAXSelectedTextAttribute as String) as? String, !text.isEmpty {
             return text
@@ -379,7 +447,7 @@ class TextProcessingManager: ObservableObject {
     private func replaceTextViaAccessibility(_ newText: String) -> Bool {
         guard let app = NSWorkspace.shared.frontmostApplication else { return false }
         let element = AXUIElementCreateApplication(app.processIdentifier)
-        guard let focused = getAXAttribute(element, kAXFocusedUIElementAttribute as String) as! AXUIElement? else { return false }
+        guard let focused = asAXUIElement(getAXAttribute(element, kAXFocusedUIElementAttribute as String)) else { return false }
         return AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, newText as CFString) == .success
     }
 }

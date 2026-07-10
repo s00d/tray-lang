@@ -7,7 +7,7 @@ class TextTransformer: ObservableObject {
         didSet {
             // Сохраняем ID активного профиля при его изменении
             if let id = activeProfileID {
-                UserDefaults.standard.set(id.uuidString, forKey: "activeProfileID")
+                UserDefaults.standard.set(id.uuidString, forKey: DefaultsKeys.activeProfileID)
             }
             updateActiveMapping()
         }
@@ -66,41 +66,10 @@ class TextTransformer: ObservableObject {
         return result
     }
     
-    // MARK: - Language Detection
-    func detectLanguage(_ text: String) -> Bool {
-        // В новой логике каждая буква обрабатывается отдельно
-        let textChars = Set(text.lowercased().map { String($0) })
-        let russianCount = textChars.intersection(fromToMapping.keys).count
-        let englishCount = textChars.intersection(toFromMapping.keys).count
-        
-        return russianCount > englishCount
-    }
-    
-    // MARK: - Mapping Management (обратная совместимость)
-    func updateMapping(_ newMapping: [String: String]) {
-        // Обновляем активный профиль, если он редактируемый
-        if var active = activeProfile, active.isEditable {
-            active.mapping = newMapping
-            updateProfile(active)
-        } else {
-            // Если профиль не редактируемый, создаем новый на его основе
-            if let active = activeProfile {
-                addProfile(name: "\(active.name) (Custom)", basedOn: active)
-                if let newProfile = profiles.last {
-                    var updated = newProfile
-                    updated.mapping = newMapping
-                    updateProfile(updated)
-                    activeProfileID = newProfile.id
-                }
-            }
-        }
-    }
-    
     // MARK: - Profile Management
     
     func loadProfiles() {
-        // Проверяем, есть ли уже сохраненные профили
-        if let data = UserDefaults.standard.data(forKey: "userProfiles") {
+        if let data = UserDefaults.standard.data(forKey: DefaultsKeys.userProfiles) {
             if let decoded = try? JSONDecoder().decode([ConversionProfile].self, from: data) {
                 profiles = decoded
             } else {
@@ -124,7 +93,7 @@ class TextTransformer: ObservableObject {
         var defaultProfileSet = false
         
         // 1. Пытаемся загрузить сохраненный ID активного профиля
-        if let idString = UserDefaults.standard.string(forKey: "activeProfileID"),
+        if let idString = UserDefaults.standard.string(forKey: DefaultsKeys.activeProfileID),
            let id = UUID(uuidString: idString),
            profiles.contains(where: { $0.id == id }) {
             activeProfileID = id
@@ -151,7 +120,7 @@ class TextTransformer: ObservableObject {
     
     // МИГРАЦИЯ: Преобразуем старые данные в профиль
     private func migrateOldData() {
-        if let savedMapping = UserDefaults.standard.object(forKey: "customSymbols") as? Data {
+        if let savedMapping = UserDefaults.standard.object(forKey: DefaultsKeys.customSymbols) as? Data {
             do {
                 let decoder = JSONDecoder()
                 let customMapping = try decoder.decode([String: String].self, from: savedMapping)
@@ -166,7 +135,7 @@ class TextTransformer: ObservableObject {
                 activeProfileID = migratedProfile.id
                 
                 // Удаляем старые данные после миграции
-                UserDefaults.standard.removeObject(forKey: "customSymbols")
+                UserDefaults.standard.removeObject(forKey: DefaultsKeys.customSymbols)
                 print("✅ Migrated old custom symbols to profile: \(migratedProfile.name)")
             } catch {
                 print("❌ Error migrating old symbols: \(error)")
@@ -176,7 +145,7 @@ class TextTransformer: ObservableObject {
     
     func saveProfiles() {
         if let data = try? JSONEncoder().encode(profiles) {
-            UserDefaults.standard.set(data, forKey: "userProfiles")
+            UserDefaults.standard.set(data, forKey: DefaultsKeys.userProfiles)
         }
     }
     
@@ -243,17 +212,6 @@ class TextTransformer: ObservableObject {
         profiles.append(duplicatedProfile)
         // Опционально: сразу делаем активным дубликат
         activeProfileID = duplicatedProfile.id
-        saveProfiles()
-    }
-    
-    // Обратная совместимость: для старого кода
-    func loadSymbols() {
-        // Теперь просто загружаем профили
-        loadProfiles()
-    }
-    
-    func saveSymbols() {
-        // Сохраняем профили
         saveProfiles()
     }
 } 

@@ -27,7 +27,7 @@ A clear and concise description of what actually happened.
 If applicable, add screenshots to help explain your problem.
 
 **Environment:**
- - macOS Version: [e.g. 14.0]
+ - macOS Version: [e.g. 15.0]
  - Xcode Version: [e.g. 15.2]
  - Tray Lang Version: [e.g. 1.0.0]
 

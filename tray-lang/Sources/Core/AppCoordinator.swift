@@ -7,14 +7,23 @@ class AppCoordinator: ObservableObject {
     // --- UI State Properties ---
     @Published var isAutoLaunchEnabled: Bool
     @Published var isTextConversionEnabled: Bool
+    @Published var isSpellCheckEnabled: Bool
     @Published var isCmdQBlockerEnabled: Bool
     @Published var isCmdWBlockerEnabled: Bool
     @Published var isAccessibilityGranted: Bool
+    @Published var isSecureInputActive: Bool = false
+    @Published private(set) var secureInputHolderName: String?
+    @Published private(set) var isSecureInputStale: Bool = false
+    @Published var isSmartLayoutEnabled: Bool
+    @Published var blockerDelay: Int
+    @Published private(set) var layoutHotKeyDisplay: String = ""
+    @Published private(set) var spellCheckHotKeyDisplay: String = ""
 
     // --- Core Managers ---
     let keyboardLayoutManager: KeyboardLayoutManager
     let hotKeyManager: HotKeyManager
     let textTransformer: TextTransformer
+    let spellCheckManager: SpellCheckManager
     let accessibilityManager: AccessibilityManager
     let autoLaunchManager: AutoLaunchManager
     let textProcessingManager: TextProcessingManager
@@ -33,9 +42,14 @@ class AppCoordinator: ObservableObject {
         self.keyboardLayoutManager = KeyboardLayoutManager()
         self.hotKeyManager = HotKeyManager()
         self.textTransformer = TextTransformer()
+        self.spellCheckManager = SpellCheckManager()
         self.accessibilityManager = AccessibilityManager()
         self.autoLaunchManager = AutoLaunchManager()
-        self.textProcessingManager = TextProcessingManager(textTransformer: textTransformer, keyboardLayoutManager: keyboardLayoutManager)
+        self.textProcessingManager = TextProcessingManager(
+            textTransformer: textTransformer,
+            keyboardLayoutManager: keyboardLayoutManager,
+            spellCheckManager: spellCheckManager
+        )
         self.smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
         self.notificationManager = NotificationManager()
         
@@ -44,15 +58,19 @@ class AppCoordinator: ObservableObject {
         
         // --- Первоначальная загрузка состояния из UserDefaults ---
         let savedAutoLaunch = autoLaunchManager.isAutoLaunchEnabled()
-        let savedTextConversion = UserDefaults.standard.bool(forKey: "hotKeyMonitoringEnabled")
-        let savedCmdQBlocker = UserDefaults.standard.bool(forKey: "qblocker_enabled")
-        let savedCmdWBlocker = UserDefaults.standard.bool(forKey: "wblocker_enabled")
+        let savedTextConversion = UserDefaults.standard.bool(forKey: DefaultsKeys.hotKeyMonitoringEnabled)
+        let savedSpellCheckEnabled = UserDefaults.standard.bool(forKey: DefaultsKeys.spellCheckEnabled)
+        let savedCmdQBlocker = UserDefaults.standard.bool(forKey: DefaultsKeys.qblockerEnabled)
+        let savedCmdWBlocker = UserDefaults.standard.bool(forKey: DefaultsKeys.wblockerEnabled)
         
         self.isAutoLaunchEnabled = savedAutoLaunch
         self.isTextConversionEnabled = savedTextConversion
+        self.isSpellCheckEnabled = savedSpellCheckEnabled
         self.isCmdQBlockerEnabled = savedCmdQBlocker
         self.isCmdWBlockerEnabled = savedCmdWBlocker
         self.isAccessibilityGranted = false // Начинаем с false, таймер исправит
+        self.isSmartLayoutEnabled = false
+        self.blockerDelay = 1
         
         // ИСПРАВЛЕНО: Создаем hotkeyBlockerManager с явной передачей настроек
         self.hotkeyBlockerManager = HotkeyBlockerManager(
@@ -65,6 +83,10 @@ class AppCoordinator: ObservableObject {
         // Явно устанавливаем начальные значения после инициализации всех свойств
         self.hotkeyBlockerManager.isCmdQEnabled = savedCmdQBlocker
         self.hotkeyBlockerManager.isCmdWEnabled = savedCmdWBlocker
+        self.isSmartLayoutEnabled = smartLayoutManager.isEnabled
+        self.blockerDelay = hotkeyBlockerManager.delay
+        self.layoutHotKeyDisplay = hotKeyManager.layoutHotKey.displayString
+        self.spellCheckHotKeyDisplay = hotKeyManager.spellCheckHotKey.displayString
 
         // Устанавливаем связи
         windowManager.setCoordinator(self)
@@ -78,16 +100,12 @@ class AppCoordinator: ObservableObject {
         accessibilityManager.$isGranted
             .receive(on: DispatchQueue.main)
             .sink { [weak self] granted in
-                guard let self = self else { return }
-                
-                // 1. Обновляем UI
+                guard let self else { return }
                 self.isAccessibilityGranted = granted
                 
-                // 2. РЕАКЦИЯ НА ИЗМЕНЕНИЕ ПРАВ
                 if granted {
                     debugLog("✅ Права доступа получены! Перезапускаем сервисы...")
                     
-                    // Если мониторинг должен быть включен, но стоял на паузе из-за прав — запускаем
                     if self.isTextConversionEnabled && !self.hotKeyManager.isEnabled {
                         self.hotKeyManager.startMonitoring()
                     }
@@ -107,7 +125,6 @@ class AppCoordinator: ObservableObject {
                     }
                 }
                 
-                // Обновляем иконку в статус-баре
                 self.updateStatusBarIcon()
             }
             .store(in: &cancellables)
@@ -117,8 +134,7 @@ class AppCoordinator: ObservableObject {
             .receive(on: DispatchQueue.main)  // ИСПРАВЛЕНО: Обязательно в main thread!
             .sink { [weak self] enabled in
                 guard let self = self else { return }
-                self.hotKeyManager.isEnabled = enabled
-                self.hotKeyManager.saveEnabledState()
+                self.hotKeyManager.saveEnabledState(enabled)
                 
                 // Запускаем/останавливаем только если есть права
                 if self.isAccessibilityGranted {
@@ -135,16 +151,38 @@ class AppCoordinator: ObservableObject {
         
         // НОВОЕ: Подписка на изменения Secure Input
         hotKeyManager.$isSecureInputActive
-            .receive(on: DispatchQueue.main)  // ИСПРАВЛЕНО: Обязательно в main thread!
-            .sink { [weak self] _ in
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isActive in
+                self?.isSecureInputActive = isActive
                 self?.updateStatusBarIcon()
+            }
+            .store(in: &cancellables)
+
+        hotKeyManager.$secureInputHolderName
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] name in
+                self?.secureInputHolderName = name
+            }
+            .store(in: &cancellables)
+
+        hotKeyManager.$isSecureInputStale
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isStale in
+                self?.isSecureInputStale = isStale
             }
             .store(in: &cancellables)
             
         $isAutoLaunchEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)  // ИСПРАВЛЕНО: Обязательно в main thread!
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in
                 enabled ? self?.autoLaunchManager.enableAutoLaunch() : self?.autoLaunchManager.disableAutoLaunch()
+            }
+            .store(in: &cancellables)
+
+        $isSpellCheckEnabled.dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { enabled in
+                UserDefaults.standard.set(enabled, forKey: DefaultsKeys.spellCheckEnabled)
             }
             .store(in: &cancellables)
             
@@ -164,11 +202,49 @@ class AppCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Слушаем нажатие горячей клавиши
-        NotificationCenter.default.publisher(for: .hotKeyPressed)
+        $isSmartLayoutEnabled.dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self, self.smartLayoutManager.isEnabled != enabled else { return }
+                self.smartLayoutManager.isEnabled = enabled
+            }
+            .store(in: &cancellables)
+        
+        $blockerDelay.dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] delay in
+                guard let self else { return }
+                self.hotkeyBlockerManager.delay = delay
+                self.hotkeyBlockerManager.saveSettings()
+            }
+            .store(in: &cancellables)
+        
+        hotKeyManager.$layoutHotKey
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] hotKey in
+                self?.layoutHotKeyDisplay = hotKey.displayString
+            }
+            .store(in: &cancellables)
+        
+        hotKeyManager.$spellCheckHotKey
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] hotKey in
+                self?.spellCheckHotKeyDisplay = hotKey.displayString
+            }
+            .store(in: &cancellables)
+        
+        NotificationCenter.default.publisher(for: .layoutHotKeyPressed)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.handleHotKeyPressed()
+                self?.handleHotKeyPressed(action: .changeLayout)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .spellCheckHotKeyPressed)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self, self.isSpellCheckEnabled else { return }
+                self.handleHotKeyPressed(action: .fixSpelling)
             }
             .store(in: &cancellables)
     }
@@ -192,60 +268,6 @@ class AppCoordinator: ObservableObject {
     // УДАЛЕНО: updateUIState() и updateServicesBasedOnPermissions()
     // Теперь вся логика обрабатывается через Combine subscriptions в setupBindings()
     
-    private func startHotkeyBlocker() {
-        do {
-            try hotkeyBlockerManager.startIfEnabled()
-        } catch QBlockerError.AccessibilityPermissionDenied {
-            print("❌ HotkeyBlocker: Accessibility permissions denied - HotkeyBlocker cannot start")
-            notificationManager.showAlert(
-                title: "HotkeyBlocker Error",
-                message: "HotkeyBlocker requires accessibility permissions to monitor Cmd+Q and Cmd+W. Please enable accessibility access in System Preferences > Security & Privacy > Privacy > Accessibility.",
-                style: .warning
-            )
-            openSystemPreferences()
-        } catch QBlockerError.EventTapCreationFailed {
-            print("❌ HotkeyBlocker: Failed to create event tap")
-            notificationManager.showAlert(
-                title: "HotkeyBlocker Error",
-                message: "Failed to create event monitoring for HotkeyBlocker. This may be due to system restrictions.",
-                style: .warning
-            )
-        } catch QBlockerError.RunLoopSourceCreationFailed {
-            print("❌ HotkeyBlocker: Failed to create run loop source")
-            notificationManager.showAlert(
-                title: "HotkeyBlocker Error",
-                message: "Failed to initialize HotkeyBlocker monitoring. Please try restarting the application.",
-                style: .warning
-            )
-        } catch {
-            print("❌ HotkeyBlocker: Unknown error: \(error)")
-            notificationManager.showAlert(
-                title: "HotkeyBlocker Error",
-                message: "An unexpected error occurred while starting HotkeyBlocker: \(error.localizedDescription)",
-                style: .warning
-            )
-        }
-    }
-    
-    private func openSystemPreferences() {
-        let script = """
-        tell application "System Preferences"
-            activate
-            set current pane to pane id "com.apple.preference.security"
-        end tell
-        """
-        
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        
-        do {
-            try task.run()
-        } catch {
-            print("❌ Failed to open System Preferences: \(error)")
-        }
-    }
-    
     func stop() {
         // УЛУЧШЕНО: stateUpdateTimer больше нет, Combine сам управляет подписками
         hotKeyManager.stopMonitoring()
@@ -254,7 +276,7 @@ class AppCoordinator: ObservableObject {
     }
     
     // MARK: - Event Handling
-    private func handleHotKeyPressed() {
+    private func handleHotKeyPressed(action: ProcessingAction) {
         // Проверяем права доступа
         guard isAccessibilityGranted else {
             notificationManager.showAlert(
@@ -265,11 +287,14 @@ class AppCoordinator: ObservableObject {
             return
         }
         
-        // Показываем уведомление о конвертации
-        notificationManager.showConversionNotification()
+        if action == .changeLayout {
+            notificationManager.showHUD(text: "Converting layout...", icon: "🔄", delayTime: 0.5)
+        } else {
+            notificationManager.showHUD(text: "Fixing spelling...", icon: "✨", delayTime: 0.5)
+        }
         
         // Обрабатываем выделенный текст
-        textProcessingManager.processSelectedText()
+        textProcessingManager.processSelectedText(action: action)
     }
     
     // MARK: - Public Interface
@@ -277,22 +302,29 @@ class AppCoordinator: ObservableObject {
         windowManager.showMainWindow()
     }
     
-    func hideDockIcon() {
-        windowManager.hideDockIcon()
+    func updateLayoutHotKey(_ newHotKey: HotKey) {
+        hotKeyManager.updateLayoutHotKey(newHotKey)
+        layoutHotKeyDisplay = newHotKey.displayString
     }
     
-    func showDockIcon() {
-        windowManager.showDockIcon()
+    func updateSpellCheckHotKey(_ newHotKey: HotKey) {
+        hotKeyManager.updateSpellCheckHotKey(newHotKey)
+        spellCheckHotKeyDisplay = newHotKey.displayString
     }
-    
+
     // MARK: - Hot Key Interface
-    var hotKey: HotKey {
-        get { hotKeyManager.hotKey }
-        set { hotKeyManager.updateHotKey(newValue) }
+    var layoutHotKey: HotKey {
+        get { hotKeyManager.layoutHotKey }
+        set { updateLayoutHotKey(newValue) }
     }
     
-    func saveHotKey() {
-        hotKeyManager.saveHotKey()
+    var spellCheckHotKey: HotKey {
+        get { hotKeyManager.spellCheckHotKey }
+        set { updateSpellCheckHotKey(newValue) }
+    }
+
+    func saveHotKeys() {
+        hotKeyManager.saveHotKeys()
     }
     
     func stopKeyCapture() {
@@ -300,6 +332,7 @@ class AppCoordinator: ObservableObject {
     }
     
     func startKeyCapture() {
+        guard isTextConversionEnabled, isAccessibilityGranted else { return }
         hotKeyManager.startMonitoring()
     }
     
@@ -312,10 +345,23 @@ class AppCoordinator: ObservableObject {
         return KeyUtils.getAvailableModifiers()
     }
     
+    func recheckSecureInput() {
+        hotKeyManager.recheckSecureInput()
+    }
+
+    var secureInputStatusMessage: String {
+        if isSecureInputStale {
+            return "macOS session stuck after the app quit. kill won't help — lock screen (⌃⌘Q), relogin, or reboot."
+        }
+        if let secureInputHolderName, !secureInputHolderName.isEmpty {
+            return "\(secureInputHolderName) holds Secure Input. Layout hotkeys still work; Cmd+Q/W blocker may not."
+        }
+        return "Another app holds Secure Input. Layout hotkeys still work; Cmd+Q/W blocker may not."
+    }
+
     // MARK: - Status Bar Icon Updates
     private func updateStatusBarIcon() {
         windowManager.updateStatusItemIcon(
-            isSecureInputActive: hotKeyManager.isSecureInputActive,
             isEnabled: isTextConversionEnabled && isAccessibilityGranted
         )
     }

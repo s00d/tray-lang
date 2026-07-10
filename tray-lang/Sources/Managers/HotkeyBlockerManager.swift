@@ -18,13 +18,13 @@ class HotkeyBlockerManager: ObservableObject {
     private var canQuit: Bool = true
     private var canClose: Bool = true
     
-    private var eventTap: CFMachPort?
-    
     // Используются в callback функциях, поэтому не могут быть private
     var keyDownEventTap: CFMachPort?
     var keyUpEventTap: CFMachPort?
     private var keyDownRunLoopSource: CFRunLoopSource?
     private var keyUpRunLoopSource: CFRunLoopSource?
+    
+    private var isTapUserInfoRetained = false
     
     // Отдельный поток для мониторинга клавиатуры
     private var monitoringThread: Thread?
@@ -46,12 +46,15 @@ class HotkeyBlockerManager: ObservableObject {
         self.exclusionManager = exclusionManager
         // 2. УБИРАЕМ loadSettings() из init. AppCoordinator сам задаст начальные значения.
         // Загружаем только статистику и задержку
-        self.internalAccidentalQuits = UserDefaults.standard.integer(forKey: "qblocker_accidental_quits")
-        self.internalAccidentalCloses = UserDefaults.standard.integer(forKey: "wblocker_accidental_closes")
+        self.internalAccidentalQuits = UserDefaults.standard.integer(forKey: DefaultsKeys.qblockerAccidentalQuits)
+        self.internalAccidentalCloses = UserDefaults.standard.integer(forKey: DefaultsKeys.wblockerAccidentalCloses)
         self.accidentalQuits = internalAccidentalQuits
         self.accidentalCloses = internalAccidentalCloses
-        let savedDelay = UserDefaults.standard.integer(forKey: "qblocker_delay")
-        self.delay = savedDelay == 0 ? 1 : savedDelay
+        if UserDefaults.standard.object(forKey: DefaultsKeys.qblockerDelay) == nil {
+            self.delay = 1
+        } else {
+            self.delay = UserDefaults.standard.integer(forKey: DefaultsKeys.qblockerDelay)
+        }
         
         // Подписываемся на смену приложения для кэширования проверки Cmd+Q
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -70,11 +73,11 @@ class HotkeyBlockerManager: ObservableObject {
     // MARK: - Settings Management
     // loadSettings() удален - AppCoordinator сам задает начальные значения
     func saveSettings() {
-        UserDefaults.standard.set(isCmdQEnabled, forKey: "qblocker_enabled")
-        UserDefaults.standard.set(isCmdWEnabled, forKey: "wblocker_enabled")
-        UserDefaults.standard.set(internalAccidentalQuits, forKey: "qblocker_accidental_quits")
-        UserDefaults.standard.set(internalAccidentalCloses, forKey: "wblocker_accidental_closes")
-        UserDefaults.standard.set(delay, forKey: "qblocker_delay")
+        UserDefaults.standard.set(isCmdQEnabled, forKey: DefaultsKeys.qblockerEnabled)
+        UserDefaults.standard.set(isCmdWEnabled, forKey: DefaultsKeys.wblockerEnabled)
+        UserDefaults.standard.set(internalAccidentalQuits, forKey: DefaultsKeys.qblockerAccidentalQuits)
+        UserDefaults.standard.set(internalAccidentalCloses, forKey: DefaultsKeys.wblockerAccidentalCloses)
+        UserDefaults.standard.set(delay, forKey: DefaultsKeys.qblockerDelay)
     }
     
     // MARK: - Lifecycle
@@ -103,8 +106,7 @@ class HotkeyBlockerManager: ObservableObject {
             } catch {
                 debugLog("❌ Error starting tap on thread: \(error)")
                 DispatchQueue.main.async {
-                    self.isCmdQEnabled = false
-                    self.isCmdWEnabled = false
+                    self.handleStartupError(error)
                 }
             }
         }
@@ -114,13 +116,6 @@ class HotkeyBlockerManager: ObservableObject {
         monitoringThread?.start()
         
         debugLog("✅ HotkeyBlocker monitoring thread started")
-    }
-    
-    func startIfEnabled() throws {
-        if isCmdQEnabled || isCmdWEnabled {
-            try startKeyMonitoring()
-            debugLog("✅ HotkeyBlocker monitoring started")
-        }
     }
     
     func stop() {
@@ -137,24 +132,6 @@ class HotkeyBlockerManager: ObservableObject {
         monitoringRunLoop = nil
         
         debugLog("⏹️ HotkeyBlocker monitoring stopped")
-        
-        // Сбрасываем состояние после остановки
-        DispatchQueue.main.async {
-            self.isCmdQEnabled = false
-            self.isCmdWEnabled = false
-        }
-    }
-    
-    func forceStop() {
-        stopKeyMonitoring()
-        debugLog("⏹️ HotkeyBlocker monitoring force stopped")
-        
-        // Принудительно сбрасываем состояние
-        DispatchQueue.main.async {
-            self.isCmdQEnabled = false
-            self.isCmdWEnabled = false
-            self.saveSettings()
-        }
     }
     
     // 4. УПРОЩАЕМ updateMonitoringState. Теперь он просто слушается AppCoordinator.
@@ -186,53 +163,39 @@ class HotkeyBlockerManager: ObservableObject {
         return keyDownEventTap != nil && keyUpEventTap != nil
     }
     
-    func syncState() {
-        debugLog("🔄 Syncing HotkeyBlocker state...")
-        debugLog("  📋 isCmdQEnabled: \(isCmdQEnabled)")
-        debugLog("  📋 isCmdWEnabled: \(isCmdWEnabled)")
-        debugLog("  📋 isMonitoring: \(isMonitoring)")
-        
-        // Синхронизируем состояние с фактическим мониторингом
-        if !isMonitoring && (isCmdQEnabled || isCmdWEnabled) {
-            debugLog("  ⚠️ State mismatch detected, resetting...")
-            DispatchQueue.main.async {
-                self.isCmdQEnabled = false
-                self.isCmdWEnabled = false
-                self.saveSettings()
-            }
-        }
-    }
-    
     // MARK: - Key Monitoring
     private func startKeyMonitoring() throws {
-        // Key Down Event Tap
+        let retainedSelf = Unmanaged.passRetained(self)
+        isTapUserInfoRetained = true
+        let userInfo = retainedSelf.toOpaque()
+        
         keyDownEventTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
             callback: keyDownCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
+            userInfo: userInfo
         )
         
-        // Key Up Event Tap
         keyUpEventTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(1 << CGEventType.keyUp.rawValue),
             callback: keyUpCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
+            userInfo: userInfo
         )
         
-        // Check if event taps were created successfully
         guard keyDownEventTap != nil else {
             debugLog("❌ HotkeyBlocker: Failed to create keyDown event tap - accessibility permissions may be denied")
+            releaseTapUserInfo()
             throw QBlockerError.AccessibilityPermissionDenied
         }
         
         guard keyUpEventTap != nil else {
             debugLog("❌ HotkeyBlocker: Failed to create keyUp event tap - accessibility permissions may be denied")
+            releaseTapUserInfo()
             throw QBlockerError.AccessibilityPermissionDenied
         }
         
@@ -240,12 +203,14 @@ class HotkeyBlockerManager: ObservableObject {
         keyDownRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyDownEventTap, 0)
         guard keyDownRunLoopSource != nil else {
             debugLog("❌ HotkeyBlocker: Failed to create keyDown run loop source")
+            releaseTapUserInfo()
             throw QBlockerError.RunLoopSourceCreationFailed
         }
         
         keyUpRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyUpEventTap, 0)
         guard keyUpRunLoopSource != nil else {
             debugLog("❌ HotkeyBlocker: Failed to create keyUp run loop source")
+            releaseTapUserInfo()
             throw QBlockerError.RunLoopSourceCreationFailed
         }
         
@@ -260,10 +225,12 @@ class HotkeyBlockerManager: ObservableObject {
     private func stopKeyMonitoring() {
         if let keyDownEventTap = keyDownEventTap {
             CGEvent.tapEnable(tap: keyDownEventTap, enable: false)
+            CFMachPortInvalidate(keyDownEventTap)
         }
         
         if let keyUpEventTap = keyUpEventTap {
             CGEvent.tapEnable(tap: keyUpEventTap, enable: false)
+            CFMachPortInvalidate(keyUpEventTap)
         }
         
         if let keyDownRunLoopSource = keyDownRunLoopSource, let runLoop = monitoringRunLoop {
@@ -274,10 +241,52 @@ class HotkeyBlockerManager: ObservableObject {
             CFRunLoopRemoveSource(runLoop, keyUpRunLoopSource, .commonModes)
         }
         
+        releaseTapUserInfo()
+        
         keyDownEventTap = nil
         keyUpEventTap = nil
         keyDownRunLoopSource = nil
         keyUpRunLoopSource = nil
+    }
+    
+    private func releaseTapUserInfo() {
+        if isTapUserInfoRetained {
+            Unmanaged.passUnretained(self).release()
+            isTapUserInfoRetained = false
+        }
+    }
+    
+    private func handleStartupError(_ error: Error) {
+        isCmdQEnabled = false
+        isCmdWEnabled = false
+        saveSettings()
+        
+        switch error {
+        case QBlockerError.AccessibilityPermissionDenied:
+            notificationManager.showAlert(
+                title: "HotkeyBlocker Error",
+                message: "HotkeyBlocker requires accessibility permissions to monitor Cmd+Q and Cmd+W. Please enable accessibility access in System Preferences > Security & Privacy > Privacy > Accessibility.",
+                style: .warning
+            )
+        case QBlockerError.EventTapCreationFailed:
+            notificationManager.showAlert(
+                title: "HotkeyBlocker Error",
+                message: "Failed to create event monitoring for HotkeyBlocker. This may be due to system restrictions.",
+                style: .warning
+            )
+        case QBlockerError.RunLoopSourceCreationFailed:
+            notificationManager.showAlert(
+                title: "HotkeyBlocker Error",
+                message: "Failed to initialize HotkeyBlocker monitoring. Please try restarting the application.",
+                style: .warning
+            )
+        default:
+            notificationManager.showAlert(
+                title: "HotkeyBlocker Error",
+                message: "An unexpected error occurred while starting HotkeyBlocker: \(error.localizedDescription)",
+                style: .warning
+            )
+        }
     }
     
     // MARK: - Event Handling
@@ -393,8 +402,20 @@ class HotkeyBlockerManager: ObservableObject {
             
             // Force quit the current application using NSRunningApplication
             DispatchQueue.main.async {
-                if let currentApp = NSWorkspace.shared.menuBarOwningApplication {
-                    debugLog("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
+                guard let currentApp = NSWorkspace.shared.menuBarOwningApplication else { return }
+                
+                if let bundleID = currentApp.bundleIdentifier,
+                   self.exclusionManager.isAppExcluded(bundleID: bundleID) {
+                    debugLog("⚠️ HotkeyBlocker: App became excluded before quit, aborting")
+                    return
+                }
+                
+                if !self.isCmdQActive(for: currentApp) {
+                    debugLog("⚠️ HotkeyBlocker: Cmd+Q no longer active for app, aborting quit")
+                    return
+                }
+                
+                debugLog("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
                     
                     // Используем нативный API для завершения приложения
                     if let runningApp = NSRunningApplication(processIdentifier: currentApp.processIdentifier) {
@@ -415,10 +436,9 @@ class HotkeyBlockerManager: ObservableObject {
                         debugLog("❌ HotkeyBlocker: Could not create NSRunningApplication, falling back to AppleScript")
                         self.terminateAppViaAppleScript(currentApp)
                     }
-                }
             }
             
-            return nil  // Block the event since we're handling it ourselves
+            return nil
         }
         
         debugLog("🔒 HotkeyBlocker: Blocking quit attempt \(cmdQTries)/\(delay)")
@@ -539,10 +559,6 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     // MARK: - Helper Methods
-    private func getKeyValue(from event: CGEvent) -> String? {
-        return NSEvent(cgEvent: event)?.charactersIgnoringModifiers
-    }
-    
     private func getKeyCode(from event: CGEvent) -> Int {
         return Int(event.getIntegerValueField(.keyboardEventKeycode))
     }
@@ -554,7 +570,7 @@ class HotkeyBlockerManager: ObservableObject {
         var menuBar: AnyObject?
         
         let result = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBar)
-        guard result == .success, let menuBar = menuBar else {
+        guard result == .success, let menuBarElement = asAXUIElement(menuBar) else {
             debugLog("  ❌ Failed to get menu bar (result: \(result))")
             return false
         }
@@ -562,7 +578,7 @@ class HotkeyBlockerManager: ObservableObject {
         debugLog("  ✅ Menu bar found")
         
         var children: AnyObject?
-        let menuResult = AXUIElementCopyAttributeValue(menuBar as! AXUIElement, kAXChildrenAttribute as CFString, &children)
+        let menuResult = AXUIElementCopyAttributeValue(menuBarElement, kAXChildrenAttribute as CFString, &children)
         
         guard menuResult == .success, let items = children as? NSArray, items.count > 1 else {
             debugLog("  ❌ Failed to get menu items (result: \(menuResult), count: \((children as? NSArray)?.count ?? 0))")
@@ -571,34 +587,38 @@ class HotkeyBlockerManager: ObservableObject {
         
         debugLog("  ✅ Menu items found: \(items.count)")
         
-        // Get the submenus of the first item (Apple menu) - like original QBlocker
         var subMenus: AnyObject?
-        let title = items[1] as! AXUIElement // subscript 1 is the File menu (like original)
-        let subMenuResult = AXUIElementCopyAttributeValue(title, kAXChildrenAttribute as CFString, &subMenus)
+        guard let fileMenu = asAXUIElement(items[1]) else {
+            debugLog("  ❌ Failed to get File menu element")
+            return false
+        }
+        let subMenuResult = AXUIElementCopyAttributeValue(fileMenu, kAXChildrenAttribute as CFString, &subMenus)
         
-        guard subMenuResult == .success, let menus = subMenus as? NSArray, menus.count > 0 else {
+        guard subMenuResult == .success, let menus = subMenus as? [AnyObject], !menus.isEmpty else {
             debugLog("  ❌ Failed to get sub menus (result: \(subMenuResult))")
             return false
         }
         
         debugLog("  ✅ Sub menus found: \(menus.count)")
         
-        // Get the entries of the submenu - like original QBlocker
         var entries: AnyObject?
-        let submenu = menus[0] as! AXUIElement
+        guard let submenu = asAXUIElement(menus[0]) else {
+            debugLog("  ❌ Failed to get submenu element")
+            return false
+        }
         let entriesResult = AXUIElementCopyAttributeValue(submenu, kAXChildrenAttribute as CFString, &entries)
         
-        guard entriesResult == .success, let menuItems = entries as? NSArray, menuItems.count > 0 else {
+        guard entriesResult == .success, let menuItems = entries as? [AnyObject], !menuItems.isEmpty else {
             debugLog("  ❌ Failed to get menu entries (result: \(entriesResult))")
             return false
         }
         
         debugLog("  ✅ Menu entries found: \(menuItems.count)")
         
-        // Check each menu item for Cmd+Q - like original QBlocker
         for (index, menu) in menuItems.enumerated() {
+            guard let menuElement = asAXUIElement(menu) else { continue }
             var cmdChar: AnyObject?
-            let cmdResult = AXUIElementCopyAttributeValue(menu as! AXUIElement, kAXMenuItemCmdCharAttribute as CFString, &cmdChar)
+            let cmdResult = AXUIElementCopyAttributeValue(menuElement, kAXMenuItemCmdCharAttribute as CFString, &cmdChar)
             
             if cmdResult == .success, let char = cmdChar as? String {
                 debugLog("  📋 Menu item \(index): cmdChar = '\(char)'")
@@ -611,6 +631,14 @@ class HotkeyBlockerManager: ObservableObject {
         
         debugLog("  ❌ Cmd+Q not found in menu")
         return false
+    }
+    
+    private func asAXUIElement(_ value: Any?) -> AXUIElement? {
+        guard let value = value as CFTypeRef?, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+        // SAFETY: Type ID verified above.
+        return unsafeBitCast(value, to: AXUIElement.self)
     }
     
     private func showHUD(delayTime: TimeInterval, hotkey: String) {

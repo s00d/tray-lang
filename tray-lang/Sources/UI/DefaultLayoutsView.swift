@@ -93,8 +93,11 @@ struct DefaultLayoutsView: View {
                   let bundleID = bundle.bundleIdentifier,
                   let appName = bundle.localizedInfoDictionary?["CFBundleName"] as? String ?? bundle.infoDictionary?["CFBundleName"] as? String,
                   let defaultLayout = keyboardLayoutManager.availableLayouts.first else {
-                // TODO: Show an alert to the user
-                print("Could not get app info or no layouts available.")
+                let alert = NSAlert()
+                alert.messageText = "Could Not Add Application"
+                alert.informativeText = "Could not read application information or no keyboard layouts are available."
+                alert.alertStyle = .warning
+                alert.runModal()
                 return
             }
             

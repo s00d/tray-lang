@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
     - name: Checkout code
@@ -133,7 +133,7 @@ jobs:
           - `README.md` - Installation and usage instructions
           
           ### System Requirements
-          - macOS 14.0 or higher
+          - macOS 15.0 or higher
           - Intel or Apple Silicon Mac
         files: |
           build/Release/Tray-Lang-v${{ env.VERSION }}-Universal.dmg

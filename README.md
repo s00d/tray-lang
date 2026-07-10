@@ -115,7 +115,7 @@ Access all settings through the main window:
 
 ## Requirements
 
-- macOS 14.0+
+- macOS 15.0+
 - Accessibility permissions (for text manipulation and hotkey blocking)
 
 ## Installation

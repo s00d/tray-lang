@@ -32,11 +32,6 @@ class AccessibilityManager: ObservableObject {
         }
     }
     
-    /// Legacy метод для обратной совместимости (если где-то используется)
-    func isAccessibilityGranted() -> Bool {
-        return isGranted
-    }
-    
     /// Запуск постоянного мониторинга через Combine Timer
     private func startMonitoring() {
         checkTimer = Timer.publish(every: 1.0, on: .main, in: .common)
@@ -76,7 +71,7 @@ class AccessibilityManager: ObservableObject {
     }
     
     private func openSystemPreferences() {
-        // Открываем конкретную страницу настроек (работает на macOS 13+)
+        // Открываем страницу Accessibility в System Settings
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
             debugLog("🔧 Открыты системные настройки (Accessibility)")

@@ -2,73 +2,86 @@
 //  tray_langApp.swift
 //  tray-lang
 //
-//  Created by s00d on 01.08.2025.
-//
 
-import SwiftUI
 import AppKit
 import Combine
 
 @main
-struct tray_langApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
-    var body: some Scene {
-        Settings {
-            EmptyView()
+final class TrayLangApplication {
+    static func main() {
+        guard SingleInstanceGuard.activateExistingInstanceIfNeeded() == false else {
+            exit(0)
         }
+
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+enum SingleInstanceGuard {
+    private static var isRunningUnderTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    @discardableResult
+    static func activateExistingInstanceIfNeeded() -> Bool {
+        if isRunningUnderTests {
+            return false
+        }
+
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != currentPID }
+
+        guard let existing = others.first else { return false }
+
+        existing.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+        return true
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: AppCoordinator!
     private var cancellables = Set<AnyCancellable>()
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Инициализируем координатор
         coordinator = AppCoordinator()
-        
-        // Делегируем всю работу с UI WindowManager'у
         coordinator.windowManager.setCoordinator(coordinator)
         coordinator.windowManager.setupStatusBar()
-        
-        // Подписываемся на смену раскладки для обновления иконки
+
         coordinator.keyboardLayoutManager.$currentLayout
             .receive(on: DispatchQueue.main)
             .sink { [weak self] newLayout in
                 self?.coordinator.windowManager.updateStatusItemTitle(shortName: newLayout?.shortName ?? "")
             }
             .store(in: &cancellables)
-        
-        // Запускаем приложение
+
         coordinator.start()
-        
-        // Этот трюк работает, давая системе завершить цикл запуска,
-        // после чего мы устанавливаем финальное состояние иконки.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.coordinator.hideDockIcon()
+
+        if ProcessInfo.processInfo.arguments.contains("-openSettings") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.coordinator.showMainWindow()
+            }
         }
     }
-    
+
     func applicationWillTerminate(_ notification: Notification) {
-        // Используем `?` для безопасного вызова
+        coordinator?.windowManager.teardownStatusBar()
         coordinator?.stop()
     }
-    
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        print("Получен запрос на завершение работы...")
-        // Выполняем все необходимые действия по очистке до того, как приложение закроется
+        coordinator?.windowManager.teardownStatusBar()
         coordinator?.stop()
-        // Сообщаем системе, что мы готовы к завершению
         return .terminateNow
     }
-    
-    func applicationDidBecomeActive(_ notification: Notification) {
-        // УЛУЧШЕНО: updateUIState() больше не нужен
-        // AccessibilityManager автоматически мониторит состояние через Combine
-    }
-    
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return false // Приложение продолжает работать в трее
+        false
     }
 }

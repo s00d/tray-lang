@@ -16,17 +16,14 @@ enum Panel: Hashable {
 }
 
 struct ContentView: View {
-    @StateObject private var coordinator: AppCoordinator
+    @ObservedObject var coordinator: AppCoordinator
     
-    @State private var selectedPanel: Panel? = .general // Default panel
+    @State private var selectedPanel: Panel = .general
     @State private var showingHotKeyEditor = false
+    @State private var editingHotKeyType: String = "layout"
     @State private var showingSymbolsEditor = false
     @State private var showingExclusionsView = false
     @State private var showingDefaultLayoutsEditor = false
-
-    init(coordinator: AppCoordinator) {
-        self._coordinator = StateObject(wrappedValue: coordinator)
-    }
 
     var body: some View {
         NavigationSplitView {
@@ -48,30 +45,23 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(220)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
         } detail: {
-            // --- DETAIL VIEW (CONTENT) ---
-            VStack {
-                if let panel = selectedPanel {
-                    switch panel {
-                    case .general:
-                        GeneralSettingsView(coordinator: coordinator)
-                    case .diagnostics:
-                        DiagnosticsView(coordinator: coordinator)
-                    case .about:
-                        AboutSettingsView()
-                    }
-                } else {
-                    Text("Select a category")
-                        .foregroundColor(.secondary)
+            Group {
+                switch selectedPanel {
+                case .general:
+                    GeneralSettingsView(coordinator: coordinator)
+                case .diagnostics:
+                    DiagnosticsView(coordinator: coordinator)
+                case .about:
+                    AboutSettingsView()
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(width: 800, height: 500)
         .sheet(isPresented: $showingHotKeyEditor) {
-            HotKeyEditorView(coordinator: coordinator)
+            HotKeyEditorView(coordinator: coordinator, hotKeyType: editingHotKeyType)
         }
         .sheet(isPresented: $showingSymbolsEditor) {
             SymbolsEditorView(appCoordinator: coordinator)
@@ -85,7 +75,12 @@ struct ContentView: View {
                 keyboardLayoutManager: coordinator.keyboardLayoutManager
             )
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openHotKeyEditor)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .openHotKeyEditor)) { notification in
+            if let type = notification.object as? String {
+                editingHotKeyType = type
+            } else {
+                editingHotKeyType = "layout"
+            }
             showingHotKeyEditor = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .openExclusionsView)) { _ in

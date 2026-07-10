@@ -3,231 +3,303 @@ import Carbon
 import AppKit
 
 // MARK: - Hot Key Manager
-class HotKeyManager: ObservableObject {
-    @Published var hotKey: HotKey = HotKey(keyCode: 18, modifiers: [.maskCommand])
-    
-    // 1. УБИРАЕМ didSet.
+final class HotKeyManager: ObservableObject {
+    private enum RegisteredHotKeyID: UInt32 {
+        case layout = 1
+        case spellCheck = 2
+    }
+
+    @Published var layoutHotKey: HotKey = HotKey(keyCode: 18, modifiers: [.maskCommand])
+    @Published var spellCheckHotKey: HotKey = HotKey(keyCode: 19, modifiers: [.maskCommand])
+
     @Published var isEnabled: Bool = false
     @Published var isSecureInputActive: Bool = false
-    
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    
-    // Отдельный поток для мониторинга клавиатуры
-    private var monitoringThread: Thread?
-    private var monitoringRunLoop: CFRunLoop?
-    
-    // Таймер для мониторинга Secure Input
-    private var secureInputTimer: Timer?
-    
+    @Published private(set) var secureInputHolderName: String?
+    @Published private(set) var isSecureInputStale: Bool = false
+
+    private var layoutHotKeyRef: EventHotKeyRef?
+    private var spellCheckHotKeyRef: EventHotKeyRef?
+    private var eventHandlerRef: EventHandlerRef?
+    private let secureInputMonitor = SecureInputMonitor()
+
+    private static let hotKeySignature: OSType = 0x7472796C // "tryl"
+
     init() {
-        // 2. УБИРАЕМ загрузку isEnabled из init.
-        loadHotKey()
-    }
-    
-    deinit {
-        stopMonitoring()
-        stopSecureInputMonitoring()
-    }
-    
-    // 3. ДОБАВЛЯЕМ функцию сохранения isEnabled, которую будет вызывать AppCoordinator
-    func saveEnabledState() {
-        UserDefaults.standard.set(isEnabled, forKey: "hotKeyMonitoringEnabled")
-    }
-    
-    // MARK: - Hot Key Management
-    func loadHotKey() {
-        if let savedHotKey = UserDefaults.standard.object(forKey: "savedHotKey") as? Data {
-            do {
-                let decoder = JSONDecoder()
-                hotKey = try decoder.decode(HotKey.self, from: savedHotKey)
-            } catch {
-                debugLog("❌ Ошибка загрузки горячей клавиши: \(error)")
-            }
-        }
-    }
-    
-    func saveHotKey() {
-        do {
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(hotKey)
-            UserDefaults.standard.set(data, forKey: "savedHotKey")
-        } catch {
-                debugLog("❌ Ошибка сохранения горячей клавиши: \(error)")
-        }
-    }
-    
-    func updateHotKey(_ newHotKey: HotKey) {
-        let wasEnabled = isEnabled
-        
-        // Останавливаем текущий мониторинг
-        if wasEnabled {
-            stopMonitoring()
-            // Небольшая задержка для завершения остановки
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        
-        // Обновляем хоткей
-        hotKey = newHotKey
-        
-        // Сохраняем новый хоткей
-        saveHotKey()
-        
-        // Перезапускаем мониторинг если он был активен
-        if wasEnabled {
-            startMonitoring()
-        }
-        
-        debugLog("🔄 Хоткей обновлен: \(newHotKey.displayString)")
-    }
-    
-    // MARK: - Monitoring
-    func startMonitoring() {
-        guard !isEnabled else { return }
-        
-        // Запускаем мониторинг Secure Input
+        loadHotKeys()
         startSecureInputMonitoring()
-        
-        // Создаем поток для мониторинга
-        monitoringThread = Thread { [weak self] in
-            guard let self = self else { return }
-            
-            let eventMask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-            
-            self.eventTap = CGEvent.tapCreate(
-                tap: .cgSessionEventTap,
-                place: .headInsertEventTap,
-                options: .defaultTap,
-                eventsOfInterest: eventMask,
-                callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-                    guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
-                    let manager = Unmanaged<HotKeyManager>.fromOpaque(refcon).takeUnretainedValue()
-                    return manager.handleKeyEvent(proxy: proxy, type: type, event: event)
-                },
-                userInfo: Unmanaged.passUnretained(self).toOpaque()
-            )
-            
-            guard let eventTap = self.eventTap else {
-                debugLog("❌ Не удалось создать event tap")
-                return
-            }
-            
-            self.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-            let currentRunLoop = CFRunLoopGetCurrent()
-            self.monitoringRunLoop = currentRunLoop
-            CFRunLoopAddSource(currentRunLoop, self.runLoopSource, .commonModes)
-            CGEvent.tapEnable(tap: eventTap, enable: true)
-            
-            DispatchQueue.main.async {
-                self.isEnabled = true
-            }
-            
-            debugLog("✅ Мониторинг горячих клавиш запущен")
-            
-            // Запускаем RunLoop этого потока
-            CFRunLoopRun()
-        }
-        
-        monitoringThread?.name = "com.traylang.hotkeyMonitor"
-        monitoringThread?.qualityOfService = .userInteractive
-        monitoringThread?.start()
     }
-    
+
+    deinit {
+        if Thread.isMainThread {
+            unregisterLayoutHotKey()
+            unregisterSpellCheckHotKey()
+        }
+        secureInputMonitor.stop()
+    }
+
+    func saveEnabledState(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: DefaultsKeys.hotKeyMonitoringEnabled)
+    }
+
+    // MARK: - Hot Key Management
+
+    func loadHotKeys() {
+        let decoder = JSONDecoder()
+
+        if let savedLayout = UserDefaults.standard.data(forKey: DefaultsKeys.savedLayoutHotKey) {
+            do {
+                layoutHotKey = try decoder.decode(HotKey.self, from: savedLayout)
+            } catch {
+                debugLog("❌ Ошибка загрузки хоткея раскладки: \(error)")
+            }
+        } else if let legacyHotKey = UserDefaults.standard.data(forKey: DefaultsKeys.savedHotKey) {
+            do {
+                layoutHotKey = try decoder.decode(HotKey.self, from: legacyHotKey)
+            } catch {
+                debugLog("❌ Ошибка загрузки legacy хоткея: \(error)")
+            }
+        }
+
+        if let savedSpell = UserDefaults.standard.data(forKey: DefaultsKeys.savedSpellCheckHotKey) {
+            do {
+                spellCheckHotKey = try decoder.decode(HotKey.self, from: savedSpell)
+            } catch {
+                debugLog("❌ Ошибка загрузки хоткея орфографии: \(error)")
+            }
+        }
+    }
+
+    func saveHotKeys() {
+        let encoder = JSONEncoder()
+
+        do {
+            let layoutData = try encoder.encode(layoutHotKey)
+            UserDefaults.standard.set(layoutData, forKey: DefaultsKeys.savedLayoutHotKey)
+            UserDefaults.standard.set(layoutData, forKey: DefaultsKeys.savedHotKey)
+        } catch {
+            debugLog("❌ Ошибка сохранения хоткея раскладки: \(error)")
+        }
+
+        do {
+            let spellData = try encoder.encode(spellCheckHotKey)
+            UserDefaults.standard.set(spellData, forKey: DefaultsKeys.savedSpellCheckHotKey)
+        } catch {
+            debugLog("❌ Ошибка сохранения хоткея орфографии: \(error)")
+        }
+    }
+
+    func updateLayoutHotKey(_ newHotKey: HotKey) {
+        layoutHotKey = newHotKey
+        saveHotKeys()
+        debugLog("🔄 Хоткей обновлен: \(newHotKey.displayString)")
+        if isEnabled {
+            runOnMain { self.registerLayoutHotKey() }
+        }
+    }
+
+    func updateSpellCheckHotKey(_ newHotKey: HotKey) {
+        spellCheckHotKey = newHotKey
+        saveHotKeys()
+        debugLog("🔄 Хоткей орфографии обновлен: \(newHotKey.displayString)")
+        if isEnabled {
+            runOnMain { self.registerSpellCheckHotKey() }
+        }
+    }
+
+    // MARK: - Monitoring
+
+    func startMonitoring() {
+        runOnMain {
+            guard !self.isEnabled else { return }
+
+            self.installEventHandlerIfNeeded()
+            self.registerLayoutHotKey()
+            self.registerSpellCheckHotKey()
+            self.isEnabled = true
+            debugLog("✅ Мониторинг горячих клавиш запущен (RegisterEventHotKey)")
+        }
+    }
+
     func stopMonitoring() {
-        guard isEnabled else { return }
-        
-        // Останавливаем мониторинг Secure Input
-        stopSecureInputMonitoring()
-        
-        // Останавливаем RunLoop потока
-        if let runLoop = monitoringRunLoop {
-            CFRunLoopStop(runLoop)
+        runOnMain {
+            guard self.isEnabled || self.layoutHotKeyRef != nil || self.spellCheckHotKeyRef != nil else { return }
+
+            self.unregisterLayoutHotKey()
+            self.unregisterSpellCheckHotKey()
+            self.isEnabled = false
+            debugLog("⏹️ Мониторинг горячих клавиш остановлен")
         }
-        
-        if let eventTap = eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        
-        if let runLoopSource = runLoopSource, let runLoop = monitoringRunLoop {
-            CFRunLoopRemoveSource(runLoop, runLoopSource, .commonModes)
-        }
-        
-        eventTap = nil
-        runLoopSource = nil
-        monitoringRunLoop = nil
-        
-        // Отменяем поток
-        monitoringThread?.cancel()
-        monitoringThread = nil
-        
-        isEnabled = false
-        debugLog("⏹️ Мониторинг горячих клавиш остановлен")
     }
-    
-    // MARK: - Event Handling
-    private func handleKeyEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Обрабатываем отключение Event Tap системой
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            debugLog("⚠️ Event Tap disabled by system (type: \(type.rawValue)). Attempting to re-enable...")
-            if let tap = eventTap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-                debugLog("🔄 Event Tap re-enabled")
+
+    // MARK: - Carbon Hot Keys
+
+    private func installEventHandlerIfNeeded() {
+        guard eventHandlerRef == nil else { return }
+
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+
+        let status = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, event, userData -> OSStatus in
+                guard let userData, let event else { return OSStatus(eventNotHandledErr) }
+                let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+                return manager.handleCarbonHotKey(event)
+            },
+            1,
+            &eventType,
+            Unmanaged.passUnretained(self).toOpaque(),
+            &eventHandlerRef
+        )
+
+        if status != noErr {
+            debugLog("❌ InstallEventHandler failed: \(status)")
+        }
+    }
+
+    private func handleCarbonHotKey(_ event: EventRef) -> OSStatus {
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            event,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+
+        guard status == noErr else { return status }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            switch hotKeyID.id {
+            case RegisteredHotKeyID.layout.rawValue:
+                debugLog("🎯 Горячая клавиша раскладки сработала!")
+                NotificationCenter.default.post(name: .layoutHotKeyPressed, object: nil)
+            case RegisteredHotKeyID.spellCheck.rawValue:
+                debugLog("🎯 Горячая клавиша орфографии сработала!")
+                NotificationCenter.default.post(name: .spellCheckHotKeyPressed, object: nil)
+            default:
+                break
             }
-            return nil
         }
-        
-        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
-        
-        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-        let flags = event.flags
-        
-        // Проверяем, соответствует ли событие нашей горячей клавише
-        if keyCode == hotKey.keyCode && flags.contains(hotKey.modifiers.first ?? []) {
-            debugLog("🎯 Горячая клавиша сработала!")
-            NotificationCenter.default.post(name: .hotKeyPressed, object: nil)
-            return nil // Поглощаем событие
-        }
-        
-        return Unmanaged.passUnretained(event)
+
+        return noErr
     }
-    
+
+    private func registerLayoutHotKey() {
+        unregisterLayoutHotKey()
+
+        var ref: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: RegisteredHotKeyID.layout.rawValue)
+        let status = RegisterEventHotKey(
+            UInt32(layoutHotKey.keyCode),
+            carbonModifiers(for: layoutHotKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &ref
+        )
+
+        if status == noErr {
+            layoutHotKeyRef = ref
+        } else {
+            debugLog("❌ RegisterEventHotKey layout failed: \(status)")
+        }
+    }
+
+    private func registerSpellCheckHotKey() {
+        unregisterSpellCheckHotKey()
+
+        var ref: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: RegisteredHotKeyID.spellCheck.rawValue)
+        let status = RegisterEventHotKey(
+            UInt32(spellCheckHotKey.keyCode),
+            carbonModifiers(for: spellCheckHotKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &ref
+        )
+
+        if status == noErr {
+            spellCheckHotKeyRef = ref
+        } else {
+            debugLog("❌ RegisterEventHotKey spell check failed: \(status)")
+        }
+    }
+
+    private func unregisterLayoutHotKey() {
+        if let layoutHotKeyRef {
+            UnregisterEventHotKey(layoutHotKeyRef)
+            self.layoutHotKeyRef = nil
+        }
+    }
+
+    private func unregisterSpellCheckHotKey() {
+        if let spellCheckHotKeyRef {
+            UnregisterEventHotKey(spellCheckHotKeyRef)
+            self.spellCheckHotKeyRef = nil
+        }
+    }
+
+    private func carbonModifiers(for hotKey: HotKey) -> UInt32 {
+        var modifiers: UInt32 = 0
+        for flag in hotKey.modifiers {
+            if flag.contains(.maskCommand) { modifiers |= UInt32(cmdKey) }
+            if flag.contains(.maskShift) { modifiers |= UInt32(shiftKey) }
+            if flag.contains(.maskAlternate) { modifiers |= UInt32(optionKey) }
+            if flag.contains(.maskControl) { modifiers |= UInt32(controlKey) }
+        }
+        return modifiers
+    }
+
+    private func runOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
+    }
+
     // MARK: - Secure Input Monitoring
+
     private func startSecureInputMonitoring() {
-        // Проверяем состояние сразу
-        checkSecureInput()
-        
-        // Запускаем таймер для периодической проверки (каждые 2 секунды)
-        secureInputTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.checkSecureInput()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            self.secureInputMonitor.onChange = { [weak self] status in
+                guard let self else { return }
+                self.isSecureInputActive = status.isActive
+                self.secureInputHolderName = status.holderProcessName
+                self.isSecureInputStale = status.isStaleHolder
+            }
+            self.secureInputMonitor.start()
+            debugLog("✅ Мониторинг Secure Input запущен")
         }
-        
-        debugLog("✅ Мониторинг Secure Input запущен")
     }
-    
+
     private func stopSecureInputMonitoring() {
-        secureInputTimer?.invalidate()
-        secureInputTimer = nil
+        secureInputMonitor.stop()
+        isSecureInputActive = false
+        secureInputHolderName = nil
+        isSecureInputStale = false
         debugLog("⏹️ Мониторинг Secure Input остановлен")
     }
-    
-    private func checkSecureInput() {
-        let isSecure = IsSecureEventInputEnabled()
-        
-        // Обновляем состояние только если оно изменилось
-        if isSecureInputActive != isSecure {
-            DispatchQueue.main.async {
-                self.isSecureInputActive = isSecure
-                if isSecure {
-                    debugLog("⚠️ Secure Input активен - перехват клавиш может не работать")
-                } else {
-                    debugLog("✅ Secure Input деактивирован - перехват клавиш работает")
-                }
-            }
+
+    func recheckSecureInput() {
+        DispatchQueue.main.async { [weak self] in
+            self?.secureInputMonitor.recheck()
         }
     }
 }
 
 // MARK: - Notifications
 extension Notification.Name {
-    static let hotKeyPressed = Notification.Name("hotKeyPressed")
+    static let layoutHotKeyPressed = Notification.Name("layoutHotKeyPressed")
+    static let spellCheckHotKeyPressed = Notification.Name("spellCheckHotKeyPressed")
 }

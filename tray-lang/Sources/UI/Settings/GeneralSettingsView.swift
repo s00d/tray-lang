@@ -5,50 +5,57 @@ struct GeneralSettingsView: View {
     
     @State private var showingDefaultLayoutsEditor = false
     
+    private var isProtectionSettingsVisible: Bool {
+        coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled
+    }
+    
     var body: some View {
-        Form {
-            Section(header: Text("Permissions & Status")) {
-                SettingsRow(icon: "lock.shield", iconColor: coordinator.isAccessibilityGranted ? .green : .red, title: "Accessibility", subtitle: coordinator.isAccessibilityGranted ? "Granted" : "Required") {
+        List {
+            Section("Permissions & Status") {
+                SettingsRow(
+                    icon: "lock.shield",
+                    iconColor: coordinator.isAccessibilityGranted ? .green : .red,
+                    title: "Accessibility",
+                    subtitle: coordinator.isAccessibilityGranted ? "Granted" : "Required"
+                ) {
                     Button(coordinator.isAccessibilityGranted ? "Granted" : "Grant...") {
                         Task {
-                            // Кнопка просто просит показать диалог или настройки
                             await coordinator.accessibilityManager.requestPermissions()
                         }
                     }
                     .disabled(coordinator.isAccessibilityGranted)
                 }
                 
-                // НОВОЕ: Индикатор Secure Input
-                if coordinator.hotKeyManager.isSecureInputActive {
+                if coordinator.isSecureInputActive {
                     SettingsRow(
                         icon: "exclamationmark.shield",
                         iconColor: .yellow,
                         title: "Secure Input Active",
-                        subtitle: "Hotkey capture is temporarily disabled"
+                        subtitle: coordinator.secureInputStatusMessage
                     ) {
-                        Text("Waiting...")
-                            .foregroundColor(.secondary)
-                            .font(.caption)
+                        Button("Recheck") {
+                            coordinator.recheckSecureInput()
+                        }
                     }
                 }
                 
                 HStack(spacing: 16) {
                     StatusIndicator(
-                        isActive: coordinator.isTextConversionEnabled && coordinator.isAccessibilityGranted && !coordinator.hotKeyManager.isSecureInputActive,
+                        isActive: coordinator.isTextConversionEnabled && coordinator.isAccessibilityGranted,
                         icon: "keyboard",
                         color: .green,
                         tooltip: "Hotkey Active"
                     )
                     
                     StatusIndicator(
-                        isActive: (coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled) && coordinator.isAccessibilityGranted,
+                        isActive: isProtectionSettingsVisible && coordinator.isAccessibilityGranted,
                         icon: "shield",
                         color: .orange,
                         tooltip: "Protection Active"
                     )
                     
                     StatusIndicator(
-                        isActive: coordinator.smartLayoutManager.isEnabled,
+                        isActive: coordinator.isSmartLayoutEnabled,
                         icon: "brain.head.profile",
                         color: .cyan,
                         tooltip: "Smart Layout Enabled"
@@ -57,24 +64,36 @@ struct GeneralSettingsView: View {
                 .padding(.vertical, 8)
             }
             
-            Section(header: Text("Main Hotkey")) {
+            Section("Main Hotkey") {
                 SettingsRow(icon: "keyboard", iconColor: .blue, title: "Hotkey", subtitle: "For converting selected text") {
-                    Button(coordinator.hotKeyManager.hotKey.displayString) {
-                        NotificationCenter.default.post(name: .openHotKeyEditor, object: nil)
+                    Button(coordinator.layoutHotKeyDisplay) {
+                        NotificationCenter.default.post(name: .openHotKeyEditor, object: "layout")
                     }
                 }
             }
             
-            Section(header: Text("Behavior")) {
+            Section("Spell Check") {
+                SettingsRow(icon: "text.badge.checkmark", iconColor: .green, title: "Fix Spelling", subtitle: "Enable spell check feature") {
+                    Toggle("", isOn: $coordinator.isSpellCheckEnabled)
+                }
+                
+                SettingsRow(icon: "keyboard", iconColor: .blue, title: "Spell Check Hotkey", subtitle: "For fixing selected text") {
+                    Button(coordinator.spellCheckHotKeyDisplay) {
+                        NotificationCenter.default.post(name: .openHotKeyEditor, object: "spell")
+                    }
+                }
+                .disabled(!coordinator.isSpellCheckEnabled)
+            }
+            
+            Section("Behavior") {
                 SettingsRow(icon: "arrow.up.circle", iconColor: .purple, title: "Auto Launch", subtitle: "Launch Tray Lang on system login") {
-                    // 2. УПРОЩАЕМ TOGGLE ДЛЯ АВТОЗАПУСКА
                     Toggle("", isOn: $coordinator.isAutoLaunchEnabled)
                 }
             }
             
-            Section(header: Text("Smart Switcher")) {
+            Section("Smart Switcher") {
                 SettingsRow(icon: "brain.head.profile", iconColor: .cyan, title: "Smart Layout", subtitle: "Remember layout for each application") {
-                    Toggle("", isOn: $coordinator.smartLayoutManager.isEnabled)
+                    Toggle("", isOn: $coordinator.isSmartLayoutEnabled)
                 }
                 
                 SettingsRow(icon: "list.bullet.rectangle.portrait", iconColor: .green, title: "Default Rules", subtitle: "Set layout for specific applications") {
@@ -82,12 +101,11 @@ struct GeneralSettingsView: View {
                         showingDefaultLayoutsEditor = true
                     }
                 }
-                .disabled(!coordinator.smartLayoutManager.isEnabled)
+                .disabled(!coordinator.isSmartLayoutEnabled)
             }
             
-            Section(header: Text("Conversion")) {
+            Section("Conversion") {
                 SettingsRow(icon: "textformat.abc", iconColor: .orange, title: "Text Conversion", subtitle: "Enable text conversion feature") {
-                    // 3. УПРОЩАЕМ TOGGLE ДЛЯ КОНВЕРТАЦИИ
                     Toggle("", isOn: $coordinator.isTextConversionEnabled)
                 }
                 
@@ -98,36 +116,31 @@ struct GeneralSettingsView: View {
                 }
             }
             
-            Section(header: Text("Accidental Press Protection")) {
+            Section("Accidental Press Protection") {
                 SettingsRow(icon: "q.circle", iconColor: .red, title: "Block Cmd+Q", subtitle: "Prevent accidental app quits") {
-                    // Привязка напрямую к AppCoordinator
                     Toggle("", isOn: $coordinator.isCmdQBlockerEnabled)
                 }
                 
                 SettingsRow(icon: "w.circle", iconColor: .orange, title: "Block Cmd+W", subtitle: "Prevent accidental window closes") {
-                    // Привязка напрямую к AppCoordinator
                     Toggle("", isOn: $coordinator.isCmdWBlockerEnabled)
                 }
             }
             
-            if coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled {
-                Section(header: Text("Protection Settings")) {
-                    SettingsRow(icon: "timer", iconColor: .gray, title: "Hold Delay", subtitle: "Time to hold keys before triggering") {
-                        Stepper("\(coordinator.hotkeyBlockerManager.delay) sec", value: $coordinator.hotkeyBlockerManager.delay, in: 1...5)
-                            .onChange(of: coordinator.hotkeyBlockerManager.delay) { _, _ in
-                                coordinator.hotkeyBlockerManager.saveSettings()
-                            }
-                    }
-                    
-                    SettingsRow(icon: "shield.slash", iconColor: .indigo, title: "Exclusions", subtitle: "Apps where protection won't work") {
-                        Button("Configure...") {
-                            NotificationCenter.default.post(name: .openExclusionsView, object: nil)
-                        }
+            Section("Protection Settings") {
+                SettingsRow(icon: "timer", iconColor: .gray, title: "Hold Delay", subtitle: "Time to hold keys before triggering") {
+                    Stepper("\(coordinator.blockerDelay) sec", value: $coordinator.blockerDelay, in: 1...5)
+                }
+                .disabled(!isProtectionSettingsVisible)
+                
+                SettingsRow(icon: "shield.slash", iconColor: .indigo, title: "Exclusions", subtitle: "Apps where protection won't work") {
+                    Button("Configure...") {
+                        NotificationCenter.default.post(name: .openExclusionsView, object: nil)
                     }
                 }
+                .disabled(!isProtectionSettingsVisible)
             }
         }
-        .formStyle(.grouped)
+        .listStyle(.inset(alternatesRowBackgrounds: true))
         .sheet(isPresented: $showingDefaultLayoutsEditor) {
             DefaultLayoutsView(
                 smartLayoutManager: coordinator.smartLayoutManager,

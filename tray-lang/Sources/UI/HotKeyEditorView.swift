@@ -10,6 +10,7 @@ import AppKit
 
 struct HotKeyEditorView: View {
     @ObservedObject var coordinator: AppCoordinator
+    let hotKeyType: String
     @Environment(\.dismiss) private var dismiss
     @State private var isCapturing = false
     @State private var capturedKey: String = ""
@@ -61,7 +62,7 @@ struct HotKeyEditorView: View {
                             Text("Current Combination")
                                 .font(.headline)
                                 .foregroundColor(.secondary)
-                            Text(coordinator.hotKey.displayString)
+                            Text((hotKeyType == "spell" ? coordinator.spellCheckHotKey : coordinator.layoutHotKey).displayString)
                                 .font(.system(.title2, design: .monospaced))
                                 .fontWeight(.medium)
                                 .padding()
@@ -113,13 +114,13 @@ struct HotKeyEditorView: View {
                 
                 Button("Confirm") {
                     if let keyCode = capturedKeyCode, !capturedModifiersArray.isEmpty {
-                        coordinator.hotKey = HotKey(keyCode: keyCode, modifiers: capturedModifiersArray)
-                        coordinator.saveHotKey()
-                        
-                        // Перезапускаем захват клавиш после обновления хоткея
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            coordinator.startKeyCapture()
+                        let newHotKey = HotKey(keyCode: keyCode, modifiers: capturedModifiersArray)
+                        if hotKeyType == "spell" {
+                            coordinator.spellCheckHotKey = newHotKey
+                        } else {
+                            coordinator.layoutHotKey = newHotKey
                         }
+                        coordinator.saveHotKeys()
                     }
                     dismiss()
                 }
@@ -130,26 +131,14 @@ struct HotKeyEditorView: View {
         }
         .frame(width: 350, height: 300)
         .onReceive(NotificationCenter.default.publisher(for: .keyCaptured)) { notification in
-            print("📨 Получено уведомление о захвате клавиши")
-            print("🔍 isCapturing: \(isCapturing)")
+            guard isCapturing,
+                  let keyCode = notification.userInfo?["keyCode"] as? Int,
+                  let modifiers = notification.userInfo?["modifiers"] as? [CGEventFlags],
+                  keyCode > 0 else { return }
             
-            if isCapturing {
-                print("📋 userInfo: \(notification.userInfo ?? [:])")
-                
-                if let keyCode = notification.userInfo?["keyCode"] as? Int,
-                   let modifiers = notification.userInfo?["modifiers"] as? [CGEventFlags],
-                   keyCode > 0 { // Игнорируем события с keyCode = 0
-                    print("✅ Успешно извлечены данные: keyCode=\(keyCode), modifiers=\(modifiers)")
-                    capturedKeyCode = keyCode
-                    capturedModifiersArray = modifiers
-                    stopCapturing()
-                } else {
-                    print("❌ Не удалось извлечь данные из уведомления или keyCode = 0")
-                    print("📋 Типы данных: keyCode=\(type(of: notification.userInfo?["keyCode"])), modifiers=\(type(of: notification.userInfo?["modifiers"]))")
-                }
-            } else {
-                print("⚠️ Захват не активен, игнорируем уведомление")
-            }
+            capturedKeyCode = keyCode
+            capturedModifiersArray = modifiers
+            stopCapturing()
         }
         .onDisappear {
             stopCapturing()
@@ -161,16 +150,15 @@ struct HotKeyEditorView: View {
     }
     
     private func startCapturing() {
-        print("🎯 Начинаем захват клавиш...")
+        coordinator.stopKeyCapture()
         isCapturing = true
         capturedKeyCode = nil
         capturedModifiersArray = []
-        print("✅ Локальный захват клавиш запущен успешно")
     }
     
     private func stopCapturing() {
         isCapturing = false
-        coordinator.stopKeyCapture()
+        coordinator.startKeyCapture()
     }
 }
 
@@ -198,36 +186,14 @@ struct KeyCaptureView: NSViewRepresentable {
                 let keyCode = Int(event.keyCode)
                 let flags = event.modifierFlags
                 
-                print("🔍 Локальный захват: Клавиша \(keyCode), Флаги \(flags.rawValue)")
+                guard keyCode > 0 else { return event }
                 
-                // Проверяем, что keyCode валидный
-                guard keyCode > 0 else {
-                    print("⚠️ Игнорируем событие с keyCode = 0")
-                    return event
-                }
-                
-                // Собираем все активные модификаторы
                 var modifiers: [CGEventFlags] = []
-                if flags.contains(.command) {
-                    modifiers.append(.maskCommand)
-                    print("  - Command")
-                }
-                if flags.contains(.shift) {
-                    modifiers.append(.maskShift)
-                    print("  - Shift")
-                }
-                if flags.contains(.option) {
-                    modifiers.append(.maskAlternate)
-                    print("  - Option")
-                }
-                if flags.contains(.control) {
-                    modifiers.append(.maskControl)
-                    print("  - Control")
-                }
+                if flags.contains(.command) { modifiers.append(.maskCommand) }
+                if flags.contains(.shift) { modifiers.append(.maskShift) }
+                if flags.contains(.option) { modifiers.append(.maskAlternate) }
+                if flags.contains(.control) { modifiers.append(.maskControl) }
                 
-                print("📋 Собранные модификаторы: \(modifiers.map { $0.rawValue })")
-                
-                // Отправляем уведомление с захваченными данными
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(
                         name: .keyCaptured,
@@ -237,10 +203,9 @@ struct KeyCaptureView: NSViewRepresentable {
                             "modifiers": modifiers
                         ]
                     )
-                    print("📤 Отправлено уведомление о захвате клавиши: \(keyCode)")
                 }
                 
-                return nil // Поглощаем событие
+                return nil
             }
         }
     }

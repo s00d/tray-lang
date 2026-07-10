@@ -240,13 +240,6 @@ class HUDAlertManager {
 
 // MARK: - Notification Manager
 class NotificationManager: ObservableObject {
-    private var notificationWindow: NSWindow?
-
-    // MARK: - Conversion Notification
-    func showConversionNotification() {
-        showHUD(text: "Converting layout...", icon: "🔄", delayTime: 0.5)
-    }
-
     // MARK: - HUD Notifications
     func showHUD(text: String, icon: String = "ℹ️", delayTime: TimeInterval? = nil) {
         HUDAlertManager.shared.showHUD(text: text, icon: icon, delayTime: delayTime)
@@ -254,19 +247,6 @@ class NotificationManager: ObservableObject {
 
     func dismissHUD() {
         HUDAlertManager.shared.dismissHUD()
-    }
-
-    // MARK: - Legacy Hotkey Blocker HUD (for backward compatibility)
-    func showHotkeyBlockerHUD(delaySeconds: Int, hotkey: String) {
-        showHUD(
-            text: "Hold \(hotkey) for \(delaySeconds) seconds to \(hotkey.contains("Q") ? "quit" : "close")",
-            icon: "🔒",
-            delayTime: TimeInterval(delaySeconds)
-        )
-    }
-
-    func dismissHotkeyBlockerHUD() {
-        dismissHUD()
     }
 
     // MARK: - Alert Dialogs
@@ -278,20 +258,6 @@ class NotificationManager: ObservableObject {
             alert.alertStyle = style
             alert.addButton(withTitle: "OK")
             alert.runModal()
-        }
-    }
-
-    func showConfirmationAlert(title: String, message: String, completion: @escaping (Bool) -> Void) {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = title
-            alert.informativeText = message
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Cancel")
-
-            let response = alert.runModal()
-            completion(response == .alertFirstButtonReturn)
         }
     }
 }
