@@ -1,0 +1,24 @@
+tray-lang/Sources/Components/NotificationManager.swift
+  s_aada1954fa2a15::t_4f6895d5df4cd7 144-149,154,158,160,168,171-173,210,212
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_efc8a5dd1dfb18 20,22
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_06ef1ed7fcec22 401,434
+  s_aada1954fa2a15::t_810feb184e2433 415,448
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0361a81a31b7c8154fd51bb51e3f49a835d1fb06",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
