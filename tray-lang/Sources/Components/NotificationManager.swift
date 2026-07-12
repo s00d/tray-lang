@@ -141,17 +141,23 @@ class HUDAlertView: NSView {
     }
 }
 
+// MARK: - Non-activating HUD panel (never steals keyboard focus)
+private final class HUDPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 // MARK: - HUD Alert Manager
 class HUDAlertManager {
     static let shared = HUDAlertManager()
 
-    private var window: NSWindow
+    private var window: HUDPanel
     private var delayer: DispatchWorkItem?
 
     private init() {
-        window = NSWindow(
+        window = HUDPanel(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
-            styleMask: .borderless,
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -159,9 +165,12 @@ class HUDAlertManager {
         window.level = .floating
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = false  // We handle shadow in the view
+        window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        window.isFloatingPanel = true
+        window.becomesKeyOnlyIfNeeded = true
+        window.hidesOnDeactivate = false
 
         let hudView = HUDAlertView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
         window.contentView = hudView
@@ -198,9 +207,9 @@ class HUDAlertManager {
         )
         window.setFrame(newRect, display: true)
 
-        // Show window with fade in animation
+        // Show without becoming key / activating the app
         window.alphaValue = 0
-        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
 
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.2
