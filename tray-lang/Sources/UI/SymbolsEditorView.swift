@@ -9,7 +9,7 @@ struct SymbolPair: Identifiable, Hashable {
 
 struct SymbolsEditorView: View {
     @ObservedObject var appCoordinator: AppCoordinator
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
     
     @State private var selectedProfileID: UUID?
 
@@ -23,7 +23,7 @@ struct SymbolsEditorView: View {
                 Button("Done") {
                     // Перед закрытием сохраняем все несохраненные изменения
                     appCoordinator.textTransformer.saveProfiles()
-                    dismiss()
+                    onDone()
                 }.buttonStyle(.borderedProminent)
             }
             .padding()

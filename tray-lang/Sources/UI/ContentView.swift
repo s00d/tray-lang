@@ -11,6 +11,11 @@ import AppKit
 // Define panels for navigation
 enum Panel: Hashable {
     case general
+    case hotkeyEditorLayout
+    case hotkeyEditorSpell
+    case symbolsEditor
+    case exclusionsEditor
+    case defaultLayoutsEditor
     case diagnostics
     case about
 }
@@ -19,11 +24,7 @@ struct ContentView: View {
     @ObservedObject var coordinator: AppCoordinator
     
     @State private var selectedPanel: Panel = .general
-    @State private var showingHotKeyEditor = false
     @State private var editingHotKeyType: String = "layout"
-    @State private var showingSymbolsEditor = false
-    @State private var showingExclusionsView = false
-    @State private var showingDefaultLayoutsEditor = false
 
     var body: some View {
         NavigationSplitView {
@@ -32,6 +33,16 @@ struct ContentView: View {
                 Section(header: Text("Settings")) {
                     Label("General", systemImage: "gear")
                         .tag(Panel.general)
+                    Label("Main Hotkey", systemImage: "keyboard")
+                        .tag(Panel.hotkeyEditorLayout)
+                    Label("Spell Check Hotkey", systemImage: "text.badge.checkmark")
+                        .tag(Panel.hotkeyEditorSpell)
+                    Label("Symbols & Languages", systemImage: "pencil")
+                        .tag(Panel.symbolsEditor)
+                    Label("Default Rules", systemImage: "list.bullet.rectangle.portrait")
+                        .tag(Panel.defaultLayoutsEditor)
+                    Label("Exclusions", systemImage: "shield.slash")
+                        .tag(Panel.exclusionsEditor)
                 }
                 
                 Section(header: Text("Tools")) {
@@ -51,6 +62,29 @@ struct ContentView: View {
                 switch selectedPanel {
                 case .general:
                     GeneralSettingsView(coordinator: coordinator)
+                case .hotkeyEditorLayout:
+                    HotKeyEditorView(coordinator: coordinator, hotKeyType: "layout") {
+                        selectedPanel = .general
+                    }
+                case .hotkeyEditorSpell:
+                    HotKeyEditorView(coordinator: coordinator, hotKeyType: "spell") {
+                        selectedPanel = .general
+                    }
+                case .symbolsEditor:
+                    SymbolsEditorView(appCoordinator: coordinator) {
+                        selectedPanel = .general
+                    }
+                case .exclusionsEditor:
+                    ExclusionsView(exclusionManager: coordinator.exclusionManager) {
+                        selectedPanel = .general
+                    }
+                case .defaultLayoutsEditor:
+                    DefaultLayoutsView(
+                        smartLayoutManager: coordinator.smartLayoutManager,
+                        keyboardLayoutManager: coordinator.keyboardLayoutManager
+                    ) {
+                        selectedPanel = .general
+                    }
                 case .diagnostics:
                     DiagnosticsView(coordinator: coordinator)
                 case .about:
@@ -60,37 +94,22 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .navigationSplitViewStyle(.balanced)
-        .sheet(isPresented: $showingHotKeyEditor) {
-            HotKeyEditorView(coordinator: coordinator, hotKeyType: editingHotKeyType)
-        }
-        .sheet(isPresented: $showingSymbolsEditor) {
-            SymbolsEditorView(appCoordinator: coordinator)
-        }
-        .sheet(isPresented: $showingExclusionsView) {
-            ExclusionsView(exclusionManager: coordinator.exclusionManager)
-        }
-        .sheet(isPresented: $showingDefaultLayoutsEditor) {
-            DefaultLayoutsView(
-                smartLayoutManager: coordinator.smartLayoutManager,
-                keyboardLayoutManager: coordinator.keyboardLayoutManager
-            )
-        }
         .onReceive(NotificationCenter.default.publisher(for: .openHotKeyEditor)) { notification in
             if let type = notification.object as? String {
                 editingHotKeyType = type
             } else {
                 editingHotKeyType = "layout"
             }
-            showingHotKeyEditor = true
+            selectedPanel = editingHotKeyType == "spell" ? .hotkeyEditorSpell : .hotkeyEditorLayout
         }
         .onReceive(NotificationCenter.default.publisher(for: .openExclusionsView)) { _ in
-            showingExclusionsView = true
+            selectedPanel = .exclusionsEditor
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSymbolsEditor)) { _ in
-            showingSymbolsEditor = true
+            selectedPanel = .symbolsEditor
         }
         .onReceive(NotificationCenter.default.publisher(for: .openDefaultLayoutsEditor)) { _ in
-            showingDefaultLayoutsEditor = true
+            selectedPanel = .defaultLayoutsEditor
         }
         .onReceive(NotificationCenter.default.publisher(for: .showAboutWindow)) { _ in
             selectedPanel = .about

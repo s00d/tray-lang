@@ -5,7 +5,7 @@ import AppKit
 struct DefaultLayoutsView: View {
     @ObservedObject var smartLayoutManager: SmartLayoutManager
     @ObservedObject var keyboardLayoutManager: KeyboardLayoutManager
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
     
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +15,7 @@ struct DefaultLayoutsView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                Button("✕") { dismiss() }
+                Button("✕") { onDone() }
                     .buttonStyle(.plain)
             }
             .padding()
@@ -71,7 +71,7 @@ struct DefaultLayoutsView: View {
             // Footer
             HStack {
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { onDone() }
                     .buttonStyle(.borderedProminent)
             }
             .padding()

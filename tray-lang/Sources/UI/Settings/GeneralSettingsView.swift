@@ -3,8 +3,6 @@ import SwiftUI
 struct GeneralSettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
     
-    @State private var showingDefaultLayoutsEditor = false
-    
     private var isProtectionSettingsVisible: Bool {
         coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled
     }
@@ -98,7 +96,7 @@ struct GeneralSettingsView: View {
                 
                 SettingsRow(icon: "list.bullet.rectangle.portrait", iconColor: .green, title: "Default Rules", subtitle: "Set layout for specific applications") {
                     Button("Configure...") {
-                        showingDefaultLayoutsEditor = true
+                        NotificationCenter.default.post(name: .openDefaultLayoutsEditor, object: nil)
                     }
                 }
                 .disabled(!coordinator.isSmartLayoutEnabled)
@@ -141,12 +139,6 @@ struct GeneralSettingsView: View {
             }
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
-        .sheet(isPresented: $showingDefaultLayoutsEditor) {
-            DefaultLayoutsView(
-                smartLayoutManager: coordinator.smartLayoutManager,
-                keyboardLayoutManager: coordinator.keyboardLayoutManager
-            )
-        }
     }
 }
 

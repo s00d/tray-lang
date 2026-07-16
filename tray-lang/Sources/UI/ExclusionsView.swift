@@ -11,7 +11,7 @@ import SwiftUI
 
 struct ExclusionsView: View {
     @ObservedObject var exclusionManager: ExclusionManager
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
     
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +21,7 @@ struct ExclusionsView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                Button("✕") { dismiss() }
+                Button("✕") { onDone() }
                     .buttonStyle(.plain)
             }
             .padding()
@@ -63,7 +63,7 @@ struct ExclusionsView: View {
             HStack {
                 Spacer()
                 Button("Done") {
-                    dismiss()
+                    onDone()
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -81,5 +81,5 @@ struct ExclusionsView: View {
 }
 
 #Preview {
-    ExclusionsView(exclusionManager: ExclusionManager())
+    ExclusionsView(exclusionManager: ExclusionManager(), onDone: {})
 } 

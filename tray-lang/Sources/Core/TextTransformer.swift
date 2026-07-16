@@ -90,11 +90,34 @@ class TextTransformer: ObservableObject {
     }
     
     // MARK: - Profile Management
+
+    static func mergeStoredProfilesWithDefaults(_ storedProfiles: [ConversionProfile]) -> [ConversionProfile] {
+        let defaultProfiles = ConversionProfile.defaultProfiles()
+        let storedDefaultsByName = Dictionary(
+            uniqueKeysWithValues: storedProfiles
+                .filter { !$0.isEditable }
+                .map { ($0.name, $0) }
+        )
+
+        let refreshedDefaults = defaultProfiles.map { defaultProfile in
+            guard let storedProfile = storedDefaultsByName[defaultProfile.name] else {
+                return defaultProfile
+            }
+
+            var refreshed = defaultProfile
+            // Keep the saved ID so activeProfileID can continue to point at the same built-in profile.
+            refreshed.id = storedProfile.id
+            return refreshed
+        }
+
+        let customProfiles = storedProfiles.filter(\.isEditable)
+        return refreshedDefaults + customProfiles
+    }
     
     func loadProfiles() {
         if let data = UserDefaults.standard.data(forKey: DefaultsKeys.userProfiles) {
             if let decoded = try? JSONDecoder().decode([ConversionProfile].self, from: data) {
-                profiles = decoded
+                profiles = Self.mergeStoredProfilesWithDefaults(decoded)
             } else {
                 // Если декодирование не удалось, загружаем стандартные
                 profiles = ConversionProfile.defaultProfiles()

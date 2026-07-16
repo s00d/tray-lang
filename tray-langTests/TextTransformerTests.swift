@@ -38,6 +38,13 @@ struct TextTransformerTests {
         transformer(forProfileNamed: "Russian (QWERTY ↔ ЙЦУКЕН)")
     }
 
+    private func defaultProfile(named name: String) -> ConversionProfile {
+        guard let profile = ConversionProfile.defaultProfiles().first(where: { $0.name == name }) else {
+            fatalError("Default profile missing: \(name)")
+        }
+        return profile
+    }
+
     private func expectedAfterRoundTrip(_ input: String, profileName: String) -> String {
         guard let aliases = Self.knownRoundTripAliases[profileName] else { return input }
         return input.map { char in
@@ -177,6 +184,36 @@ struct TextTransformerTests {
 
         #expect(mistyped == "реезыЖ..пшергиюсщь.ы00в.екфн-дфтп.кудуфыуы.ефп.м1ю43")
         #expect(transformer.transformText(mistyped) == url)
+    }
+
+    @Test func roundTripsReleaseTagURL_v1_48() {
+        let transformer = russianTransformer()
+        let url = "https://github.com/s00d/tray-lang/releases/tag/v1.48"
+
+        let once = transformer.transformText(url)
+        #expect(once != url)
+
+        let twice = transformer.transformText(once)
+        #expect(twice == url)
+    }
+
+    @Test func refreshesBuiltInProfilesFromCodeWhenStoredProfilesAreStale() {
+        var staleRussian = defaultProfile(named: "Russian (QWERTY ↔ ЙЦУКЕН)")
+        staleRussian.mapping["0"] = ")"
+
+        let custom = ConversionProfile(
+            name: "My Custom Profile",
+            isEditable: true,
+            mapping: ["a": "ф"]
+        )
+
+        let merged = TextTransformer.mergeStoredProfilesWithDefaults([staleRussian, custom])
+
+        let russian = try! #require(merged.first(where: { $0.name == "Russian (QWERTY ↔ ЙЦУКЕН)" }))
+        #expect(russian.mapping["0"] == "0")
+        #expect(russian.mapping["0"] != staleRussian.mapping["0"])
+        #expect(russian.id == staleRussian.id)
+        #expect(merged.contains(where: { $0.name == custom.name && $0.isEditable }))
     }
 
     @Test func doesNotTurnSlashesIntoYuOnSecondPass() {

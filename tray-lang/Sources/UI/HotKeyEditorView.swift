@@ -11,7 +11,7 @@ import AppKit
 struct HotKeyEditorView: View {
     @ObservedObject var coordinator: AppCoordinator
     let hotKeyType: String
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
     @State private var isCapturing = false
     @State private var capturedKey: String = ""
     @State private var capturedModifiers: String = ""
@@ -33,7 +33,7 @@ struct HotKeyEditorView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                Button("✕") { dismiss() }
+                Button("✕") { onDone() }
                     .buttonStyle(.plain)
             }
             .padding()
@@ -106,7 +106,7 @@ struct HotKeyEditorView: View {
             
             HStack {
                 Button("Cancel") {
-                    dismiss()
+                    onDone()
                 }
                 .buttonStyle(.plain)
                 
@@ -122,7 +122,7 @@ struct HotKeyEditorView: View {
                         }
                         coordinator.saveHotKeys()
                     }
-                    dismiss()
+                    onDone()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(capturedKeyCode == nil || capturedModifiersArray.isEmpty)

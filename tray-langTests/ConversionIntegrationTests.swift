@@ -133,6 +133,33 @@ final class ConversionIntegrationTests: XCTestCase {
         XCTAssertEqual(fixture.currentText, "git")
     }
 
+    func testTextFieldRoundTripReleaseTagURLv1_48ViaTriggerConversion() {
+        grantAccessibilityForTesting()
+
+        let profiles = coordinator.textTransformer.profiles
+        guard let russian = profiles.first(where: { $0.name == "Russian (QWERTY ↔ ЙЦУКЕН)" }) else {
+            return XCTFail("Russian profile missing")
+        }
+        coordinator.textTransformer.activeProfileID = russian.id
+
+        let url = "https://github.com/s00d/tray-lang/releases/tag/v1.48"
+
+        fixture = ConversionFixtureWindow(mode: .textField)
+        fixture.show(withText: url)
+        fixture.selectAll()
+
+        coordinator.triggerConversionForTesting(.changeLayout)
+        fixture.pumpRunLoop(for: 0.25)
+
+        XCTAssertNotEqual(fixture.currentText, url, "1-й проход должен изменить строку")
+
+        fixture.selectAll()
+        coordinator.triggerConversionForTesting(.changeLayout)
+        fixture.pumpRunLoop(for: 0.25)
+
+        XCTAssertEqual(fixture.currentText, url, "2-й проход должен восстановить исходный URL")
+    }
+
     func testWebViewModeIsSkippedPlaceholder() throws {
         fixture = ConversionFixtureWindow(mode: .webView)
         try XCTSkipIf(fixture.isWebViewMode, "WebView AX selection is not covered in this phase")
