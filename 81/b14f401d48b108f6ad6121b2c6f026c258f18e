@@ -1,0 +1,106 @@
+tray-lang/Sources/Utils/TerminalPromptExtractor.swift
+  s_aada1954fa2a15::t_c6879275256861 1-44
+tray-langUITests/tray_langUITests.swift
+  s_aada1954fa2a15::t_441e6c1b1f3356 22,29-31
+tray-lang/Sources/Components/NotificationManager.swift
+  s_aada1954fa2a15::t_c4f9b2d634f430 158,200-201,249,258
+  s_aada1954fa2a15::t_4b17d18f5d9e46 187-188,190
+  s_aada1954fa2a15::t_fbd07b97b34e58 181
+  s_aada1954fa2a15::t_02dea554636d08 185
+  s_aada1954fa2a15::t_5a9c839ae3e044 87-88
+  s_aada1954fa2a15::t_97a1a93f6392d2 180,182-184,186,189
+  s_aada1954fa2a15::t_62ab981c853ce0 194-196
+  s_aada1954fa2a15::t_b47fadae44718b 273-275,287-291
+tray-langTests/ClipboardConversionLogicTests.swift
+  s_aada1954fa2a15::t_5f49a530ba4651 116-121,125-126,128,131-135,140,144-148,152-156,161
+  s_aada1954fa2a15::t_2dc9d857e4ff38 109,111
+  s_aada1954fa2a15::t_29042ea338258c 1-108,110,112-115,122-124,127,129-130,136-139,141-143,149-151,157-160,162-163
+tray-langUITests/tray_langUITestsLaunchTests.swift
+  s_aada1954fa2a15::t_b40ade1a55c80b 23
+tray-lang/Sources/Utils/ProcessRuntime.swift
+  s_aada1954fa2a15::t_8f1b146be50eb0 1-19
+tray-lang/Sources/Managers/TextProcessingManager.swift
+  s_aada1954fa2a15::t_f6daae82bfdfa4 266-269,275-278
+  s_aada1954fa2a15::t_0b8d144b486202 86
+  s_aada1954fa2a15::t_3a398b83accd80 322-323,335,352,367
+  s_aada1954fa2a15::t_3e29bf23f8aa12 55
+  s_aada1954fa2a15::t_104e4018fc35d5 324-326
+  s_aada1954fa2a15::t_1c742f499658b3 153
+  s_aada1954fa2a15::t_186b64935d3ed2 301-304
+tray-lang/Sources/Core/AppCoordinator.swift
+  s_aada1954fa2a15::t_20540680d0f520 305-309
+  s_aada1954fa2a15::t_01f27171453311 256-262
+  s_aada1954fa2a15::t_6170a1cb7122de 300-301
+tray-lang/Sources/Utils/ConversionLogic.swift
+  s_aada1954fa2a15::t_27091c518cf234 1-51
+tray-lang/Sources/Utils/PasteboardHelper.swift
+  s_aada1954fa2a15::t_7feb9c432da7a9 6-7,23
+  s_aada1954fa2a15::t_d904f3384d9e61 8-9,12
+  s_aada1954fa2a15::t_0c9e1f9ca90bc8 10-11,17
+tray-langTests/ConversionFixtureWindow.swift
+  s_aada1954fa2a15::t_7c4c426a9d6d52 18-19,44-46,56,69,73-76,87,99,108,113
+  s_aada1954fa2a15::t_4f7b1bd7450ce4 1-17,20-43,47-55,57-68,70-72,77-86,88-98,100-107,109-112,114-131
+tray-langTests/SettingsWindowTests.swift
+  s_aada1954fa2a15::t_81e636031c805c 8-18,20-22,24,92-96
+  s_aada1954fa2a15::t_1ada3d9034f220 19,23,51-55,76-77
+tray-langTests/ConversionIntegrationTests.swift
+  s_aada1954fa2a15::t_6a5afdd48574ad 1-10,24-25,31-42,44-56,58-66,68-86,88-121,123-178,180-183,185-273
+  s_aada1954fa2a15::t_7ca5b3d842db5d 11-23
+  s_aada1954fa2a15::t_7cfb1365534154 87
+  s_aada1954fa2a15::t_9d69dab0d77e37 43,57,67
+  s_aada1954fa2a15::t_4312435be27005 122
+  s_aada1954fa2a15::t_8c9a91bdfa7cc3 179,184
+  s_aada1954fa2a15::t_da393631cbc2eb 26-30
+tray-lang/tray_langApp.swift
+  s_aada1954fa2a15::t_a123cbc19de3f1 27
+tray-lang/Sources/Core/AccessibilityManager.swift
+  s_aada1954fa2a15::t_4371a125d84c09 18-20
+  s_aada1954fa2a15::t_9bca178f74f427 6,10,12-17,21-23,28,30-31,38,47,49-50,55-57,60,62,67,76,81,88
+  s_aada1954fa2a15::t_2a73529bf73b27 51-54
+tray-lang/Sources/Components/WindowManager.swift
+  s_aada1954fa2a15::t_38102d6027761c 130-132
+tray-langTests/AccessibilityMockTests.swift
+  s_aada1954fa2a15::t_3823c423f3fe2e 1-30
+tray-langUITests/SettingsWindowUITests.swift
+  s_aada1954fa2a15::t_9f2463c0216421 24
+tray-lang/Sources/Models/ConversionProfile.swift
+  s_aada1954fa2a15::t_b20f6f7ba6ec25 35-36,42,48,57-58,60-61,64,66-67,69,72,76-77,80,86,88
+  s_aada1954fa2a15::t_150da33a70c5ea 83,89-90
+tray-langTests/ConversionProfileTemplateTests.swift
+  s_aada1954fa2a15::t_b1fd33c557d863 120
+  s_aada1954fa2a15::t_36aeda081eaa94 79
+  s_aada1954fa2a15::t_9c83d155fa2667 41-46,54-56,80-82,121-122,156-160,162-170,210-231
+  s_aada1954fa2a15::t_685b9df10716a8 155,161
+  s_aada1954fa2a15::t_7b2d804ae7dbae 57
+  s_aada1954fa2a15::t_e84ac195a84030 83
+tray-lang/Sources/Managers/HotkeyBlockerManager.swift
+  s_aada1954fa2a15::t_f2a8784a0ce41a 548-549,551
+  s_aada1954fa2a15::t_9fc45ff7acb90e 488-493
+  s_aada1954fa2a15::t_1f1af676d14b28 47-49
+  s_aada1954fa2a15::t_cbfafa11c5aa03 571-576
+  s_aada1954fa2a15::t_3cdcd0c44660b1 465-466,468
+  s_aada1954fa2a15::t_a9ce210baa1eb9 300-346,348-350,352,354-355,357,359-361,363-365,367,369-407,444,450,456,462,467,469,484,499-503,535,540,545,550,552,567,582-586,598-603,607,619
+tray-langTests/TextTransformerTests.swift
+  s_aada1954fa2a15::t_404c0de0381842 5-29,31-32,37-87,92-148,220-235
+  s_aada1954fa2a15::t_572fe72d50bda4 192-199,208,212,216,218-219
+  s_aada1954fa2a15::t_1c29d78fe0f292 88-91
+  s_aada1954fa2a15::t_f59eb663f651d1 191,200-207,209-211,213-215,217,236
+tray-lang/Sources/Core/KeyboardMapping.swift
+  s_aada1954fa2a15::t_23569da6de9218 30-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "81b14f401d48b108f6ad6121b2c6f026c258f18e",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
