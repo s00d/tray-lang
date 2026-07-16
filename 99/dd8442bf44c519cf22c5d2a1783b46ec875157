@@ -1,0 +1,32 @@
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_623d0c9cacb7e5 415,448
+  s_aada1954fa2a15::t_c949e70237fa9d 401,434
+tray-lang/Sources/Core/AppCoordinator.swift
+  s_aada1954fa2a15::t_92ad7c9d0c7a94 48,52-53
+  s_aada1954fa2a15::t_3af6947ca6ca6d 292,294,297-298
+tray-lang/Sources/Components/NotificationManager.swift
+  s_aada1954fa2a15::t_300194e7bdc4bc 211-220,222-228
+tray-lang/Sources/Managers/TextProcessingManager.swift
+  s_aada1954fa2a15::t_85b46bc47185cf 19,40-41,46
+  s_aada1954fa2a15::t_a1c88f1a3cb957 346-348,360-361
+tray-lang/Sources/Utils/PasteboardHelper.swift
+  s_aada1954fa2a15::t_9d5d3008dd18d8 6-7,10,17,19
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_118b9d6fe05e14 20,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "99dd8442bf44c519cf22c5d2a1783b46ec875157",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
