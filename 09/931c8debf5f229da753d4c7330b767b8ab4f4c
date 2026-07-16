@@ -1,0 +1,25 @@
+tray-langTests/ConversionIntegrationTests.swift
+  s_aada1954fa2a15::t_d4a0c7d1ffa61f 31-33
+  s_aada1954fa2a15::t_76c422af7d5cf4 81,83,95,101,103,106,117,120-121,123,125,132-133
+tray-lang/Sources/Managers/TextProcessingManager.swift
+  s_aada1954fa2a15::t_513ac934bc9668 11-16,28-30,52-56,76-108
+tray-langTests/ConversionFixtureWindow.swift
+  s_aada1954fa2a15::t_c7c6a1811a0b65 32-62
+  s_aada1954fa2a15::t_c1ac537ea702f1 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "09931c8debf5f229da753d4c7330b767b8ab4f4c",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
