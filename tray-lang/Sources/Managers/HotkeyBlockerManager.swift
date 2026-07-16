@@ -13,8 +13,12 @@ class HotkeyBlockerManager: ObservableObject {
     @Published var accidentalCloses: Int = 0
     @Published var delay: Int = 1
     
-    private var cmdQTries: Int = 0
-    private var cmdWTries: Int = 0
+    private var cmdQHoldStartedAt: Date?
+    private var cmdWHoldStartedAt: Date?
+    private var cmdQHoldCompleted = false
+    private var cmdWHoldCompleted = false
+    private var cmdQHoldTimer: DispatchWorkItem?
+    private var cmdWHoldTimer: DispatchWorkItem?
     private var canQuit: Bool = true
     private var canClose: Bool = true
     
@@ -341,9 +345,9 @@ class HotkeyBlockerManager: ObservableObject {
         
         self.currentAppBundleID = bundleID
         
-        // Сбрасываем счетчики
-        cmdQTries = 0
-        cmdWTries = 0
+        // Сбрасываем удержание при смене приложения
+        cancelCmdQHold()
+        cancelCmdWHold()
         
         // АСИНХРОННАЯ проверка (не блокирует UI)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -382,117 +386,115 @@ class HotkeyBlockerManager: ObservableObject {
             return nil
         }
         
-        // Show HUD if we're within delay
-        if cmdQTries <= delay {
-            debugLog("  📱 Showing HUD")
-            showHUD(delayTime: TimeInterval(delay), hotkey: "Cmd+Q")
-        } else {
-            // Hide HUD if we're past the delay
-            hideHUD()
-        }
-        
-        cmdQTries += 1
-        debugLog("🔢 HotkeyBlocker: cmdQTries = \(cmdQTries), delay = \(delay)")
-        
-        if cmdQTries > delay {
-            debugLog("🔓 HotkeyBlocker: Quit allowed after holding for \(delay) seconds")
-            cmdQTries = 0
-            canQuit = false  // Prevent rapid successive quits
-            hideHUD()
-            
-            // Force quit the current application using NSRunningApplication
-            DispatchQueue.main.async {
-                guard let currentApp = NSWorkspace.shared.menuBarOwningApplication else { return }
-                
-                if let bundleID = currentApp.bundleIdentifier,
-                   self.exclusionManager.isAppExcluded(bundleID: bundleID) {
-                    debugLog("⚠️ HotkeyBlocker: App became excluded before quit, aborting")
-                    return
-                }
-                
-                if !self.isCmdQActive(for: currentApp) {
-                    debugLog("⚠️ HotkeyBlocker: Cmd+Q no longer active for app, aborting quit")
-                    return
-                }
-                
-                debugLog("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
-                    
-                    // Используем нативный API для завершения приложения
-                    if let runningApp = NSRunningApplication(processIdentifier: currentApp.processIdentifier) {
-                        if runningApp.terminate() {
-                            debugLog("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
-                        } else {
-                            debugLog("❌ HotkeyBlocker: Failed to terminate, trying force terminate")
-                            // Если terminate не сработал, пробуем force terminate
-                            if runningApp.forceTerminate() {
-                                debugLog("✅ HotkeyBlocker: Successfully force terminated \(currentApp.localizedName ?? "Unknown")")
-                            } else {
-                                debugLog("❌ HotkeyBlocker: Failed to force terminate, falling back to AppleScript")
-                                // Запасной вариант - AppleScript
-                                self.terminateAppViaAppleScript(currentApp)
-                            }
-                        }
-                    } else {
-                        debugLog("❌ HotkeyBlocker: Could not create NSRunningApplication, falling back to AppleScript")
-                        self.terminateAppViaAppleScript(currentApp)
-                    }
-            }
-            
+        // Already holding — wait for timer / keyUp
+        if cmdQHoldStartedAt != nil {
             return nil
         }
         
-        debugLog("🔒 HotkeyBlocker: Blocking quit attempt \(cmdQTries)/\(delay)")
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        guard !isRepeat else { return nil }
+        
+        let requiredHold = TimeInterval(delay)
+        cmdQHoldStartedAt = Date()
+        cmdQHoldCompleted = false
+        debugLog("  📱 Showing HUD for \(delay)s hold")
+        showHUD(delayTime: requiredHold, hotkey: "Cmd+Q")
+        
+        let work = DispatchWorkItem { [weak self] in
+            self?.completeCmdQHold()
+        }
+        cmdQHoldTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + requiredHold, execute: work)
+        
         return nil
+    }
+    
+    private func completeCmdQHold() {
+        guard cmdQHoldStartedAt != nil, !cmdQHoldCompleted, canQuit else { return }
+        
+        debugLog("🔓 HotkeyBlocker: Quit allowed after holding for \(delay) seconds")
+        cmdQHoldCompleted = true
+        canQuit = false
+        hideHUD()
+        
+        guard let currentApp = NSWorkspace.shared.menuBarOwningApplication else { return }
+        
+        if let bundleID = currentApp.bundleIdentifier,
+           exclusionManager.isAppExcluded(bundleID: bundleID) {
+            debugLog("⚠️ HotkeyBlocker: App became excluded before quit, aborting")
+            return
+        }
+        
+        if !isCmdQActive(for: currentApp) {
+            debugLog("⚠️ HotkeyBlocker: Cmd+Q no longer active for app, aborting quit")
+            return
+        }
+        
+        debugLog("🚪 HotkeyBlocker: Terminating \(currentApp.localizedName ?? "Unknown")")
+        
+        if let runningApp = NSRunningApplication(processIdentifier: currentApp.processIdentifier) {
+            if runningApp.terminate() {
+                debugLog("✅ HotkeyBlocker: Successfully terminated \(currentApp.localizedName ?? "Unknown")")
+            } else if runningApp.forceTerminate() {
+                debugLog("✅ HotkeyBlocker: Successfully force terminated \(currentApp.localizedName ?? "Unknown")")
+            } else {
+                debugLog("❌ HotkeyBlocker: Failed to force terminate, falling back to AppleScript")
+                terminateAppViaAppleScript(currentApp)
+            }
+        } else {
+            debugLog("❌ HotkeyBlocker: Could not create NSRunningApplication, falling back to AppleScript")
+            terminateAppViaAppleScript(currentApp)
+        }
     }
     
     private func handleCmdWDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         debugLog("  ✅ Cmd+W detected!")
         
-        // Check if current app is excluded from protection
         if exclusionManager.isCurrentAppExcluded() {
             debugLog("  ⚠️ Current app is excluded from protection")
             return Unmanaged.passUnretained(event)
         }
         
-        // Check canClose first
         guard canClose else {
             debugLog("  ❌ Not allowed to close yet")
             return nil
         }
         
-        // Show HUD if we're within delay
-        if cmdWTries <= delay {
-            debugLog("  📱 Showing HUD")
-            showHUD(delayTime: TimeInterval(delay), hotkey: "Cmd+W")
-        } else {
-            // Hide HUD if we're past the delay
-            hideHUD()
+        if cmdWHoldStartedAt != nil {
+            return nil
         }
         
-        cmdWTries += 1
-        debugLog("🔢 HotkeyBlocker: cmdWTries = \(cmdWTries), delay = \(delay)")
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        guard !isRepeat else { return nil }
         
-        if cmdWTries > delay {
-            debugLog("🔓 HotkeyBlocker: Close allowed after holding for \(delay) seconds")
-            cmdWTries = 0
-            canClose = false  // Prevent rapid successive closes
-            hideHUD()
-            
-            // Send Cmd+W event to close the window
-            DispatchQueue.main.async {
-                debugLog("🚪 HotkeyBlocker: Sending Cmd+W to close window")
-                // Create and post a new Cmd+W event
-                if let newEvent = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true) {
-                    newEvent.flags = .maskCommand
-                    newEvent.post(tap: .cghidEventTap)
-                }
-            }
-            
-            return nil  // Block the original event since we're handling it ourselves
+        let requiredHold = TimeInterval(delay)
+        cmdWHoldStartedAt = Date()
+        cmdWHoldCompleted = false
+        debugLog("  📱 Showing HUD for \(delay)s hold")
+        showHUD(delayTime: requiredHold, hotkey: "Cmd+W")
+        
+        let work = DispatchWorkItem { [weak self] in
+            self?.completeCmdWHold()
         }
+        cmdWHoldTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + requiredHold, execute: work)
         
-        debugLog("🔒 HotkeyBlocker: Blocking close attempt \(cmdWTries)/\(delay)")
         return nil
+    }
+    
+    private func completeCmdWHold() {
+        guard cmdWHoldStartedAt != nil, !cmdWHoldCompleted, canClose else { return }
+        
+        debugLog("🔓 HotkeyBlocker: Close allowed after holding for \(delay) seconds")
+        cmdWHoldCompleted = true
+        canClose = false
+        hideHUD()
+        
+        debugLog("🚪 HotkeyBlocker: Sending Cmd+W to close window")
+        if let newEvent = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true) {
+            newEvent.flags = .maskCommand
+            newEvent.post(tap: .cghidEventTap)
+        }
     }
     
     func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -509,12 +511,10 @@ class HotkeyBlockerManager: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
         
-        // Handle Cmd+Q key up
         if keyCode == 12 && isCmdQEnabled {
             return handleCmdQUp(event)
         }
         
-        // Handle Cmd+W key up
         if keyCode == 13 && isCmdWEnabled {
             return handleCmdWUp(event)
         }
@@ -525,17 +525,13 @@ class HotkeyBlockerManager: ObservableObject {
     private func handleCmdQUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         debugLog("  ✅ KeyUp: Q key detected")
         
-        // Log accidental quit if we didn't hold long enough
-        if cmdQTries <= delay {
+        if cmdQHoldStartedAt != nil && !cmdQHoldCompleted {
             debugLog("📊 HotkeyBlocker: Accidental quit prevented! Total: \(accidentalQuits)")
             logAccidentalQuit()
-        } else {
-            hideHUD()
         }
         
-        debugLog("🔄 HotkeyBlocker: Resetting cmdQTries from \(cmdQTries) to 0")
-        cmdQTries = 0
-        canQuit = true  // Allow next quit attempt
+        cancelCmdQHold()
+        canQuit = true
         
         return Unmanaged.passUnretained(event)
     }
@@ -543,19 +539,31 @@ class HotkeyBlockerManager: ObservableObject {
     private func handleCmdWUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         debugLog("  ✅ KeyUp: W key detected")
         
-        // Log accidental close if we didn't hold long enough
-        if cmdWTries <= delay {
+        if cmdWHoldStartedAt != nil && !cmdWHoldCompleted {
             debugLog("📊 HotkeyBlocker: Accidental close prevented! Total: \(accidentalCloses)")
             logAccidentalClose()
-        } else {
-            hideHUD()
         }
         
-        debugLog("🔄 HotkeyBlocker: Resetting cmdWTries from \(cmdWTries) to 0")
-        cmdWTries = 0
-        canClose = true  // Allow next close attempt
+        cancelCmdWHold()
+        canClose = true
         
         return Unmanaged.passUnretained(event)
+    }
+    
+    private func cancelCmdQHold() {
+        cmdQHoldTimer?.cancel()
+        cmdQHoldTimer = nil
+        cmdQHoldStartedAt = nil
+        cmdQHoldCompleted = false
+        hideHUD()
+    }
+    
+    private func cancelCmdWHold() {
+        cmdWHoldTimer?.cancel()
+        cmdWHoldTimer = nil
+        cmdWHoldStartedAt = nil
+        cmdWHoldCompleted = false
+        hideHUD()
     }
     
     // MARK: - Helper Methods

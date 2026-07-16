@@ -293,8 +293,10 @@ class AppCoordinator: ObservableObject {
             notificationManager.showHUD(text: "Fixing spelling...", icon: "✨", delayTime: 0.5)
         }
         
-        // Обрабатываем выделенный текст
-        textProcessingManager.processSelectedText(action: action)
+        // Defer processing so HUD fade-in can paint before AX/clipboard work blocks the main thread
+        DispatchQueue.main.async { [weak self] in
+            self?.textProcessingManager.processSelectedText(action: action)
+        }
     }
     
     // MARK: - Public Interface
