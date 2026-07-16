@@ -150,6 +150,14 @@ final class ConversionIntegrationTests: XCTestCase {
 
         let swallowed = blocker.handleSyntheticKeyDown(keyCode: 12, commandDown: true)
         XCTAssertTrue(swallowed)
+        XCTAssertTrue(coordinator.notificationManager.isHUDVisibleForTesting)
+
+        // Simulates tray-lang HUD ordering front — must not cancel the hold.
+        NSWorkspace.shared.notificationCenter.post(
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            userInfo: [NSWorkspace.applicationUserInfoKey: NSRunningApplication.current]
+        )
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         XCTAssertTrue(coordinator.notificationManager.isHUDVisibleForTesting)
 

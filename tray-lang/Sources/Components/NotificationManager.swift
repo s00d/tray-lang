@@ -88,16 +88,18 @@ class HUDAlertView: NSView {
     var currentTextForTesting: String { textLabel.stringValue }
     
     func startProgress(duration: TimeInterval) {
-        totalDuration = duration
+        stopProgress()
+        totalDuration = max(duration, 0.05)
         elapsedTime = 0
         
-        // Reset progress bar to full width (starts at 0 and fills to 200)
         progressBar.frame = NSRect(x: 50, y: 5, width: 0, height: 4)
         
-        // Start timer
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        // .common — таймер тикает пока пользователь держит Cmd+Q (eventTracking mode).
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.updateProgress()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
     }
     
     private func updateProgress() {
@@ -224,13 +226,10 @@ class HUDAlertManager {
 
         // Show without becoming key / activating the app
         if delayTime != nil {
-            // Timed HUD (hold-to-quit): fade in, auto-dismiss
-            window.alphaValue = 0
+            // Hold-to-quit HUD: opaque immediately (fade-in never paints under key hold).
+            window.alphaValue = 1.0
             window.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.2
-                window.animator().alphaValue = 1.0
-            })
+            window.displayIfNeeded()
             delayer = DispatchWorkItem { [weak self] in
                 self?.dismissHUD()
             }

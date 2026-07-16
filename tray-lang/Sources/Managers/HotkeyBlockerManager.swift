@@ -15,6 +15,8 @@ class HotkeyBlockerManager: ObservableObject {
     
     private var cmdQHoldStartedAt: Date?
     private var cmdWHoldStartedAt: Date?
+    private var cmdQHoldTargetBundleID: String?
+    private var cmdWHoldTargetBundleID: String?
     private var cmdQHoldCompleted = false
     private var cmdWHoldCompleted = false
     private var cmdQHoldTimer: DispatchWorkItem?
@@ -418,12 +420,25 @@ class HotkeyBlockerManager: ObservableObject {
     @objc private func appChanged(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               let bundleID = app.bundleIdentifier else { return }
-        
+
+        // Our own HUD panel must not cancel an in-progress hold in the foreground app.
+        if bundleID == Bundle.main.bundleIdentifier {
+            return
+        }
+
         self.currentAppBundleID = bundleID
-        
-        // Сбрасываем удержание при смене приложения
-        cancelCmdQHold()
-        cancelCmdWHold()
+
+        if cmdQHoldStartedAt != nil,
+           let target = cmdQHoldTargetBundleID,
+           bundleID != target {
+            cancelCmdQHold()
+        }
+
+        if cmdWHoldStartedAt != nil,
+           let target = cmdWHoldTargetBundleID,
+           bundleID != target {
+            cancelCmdWHold()
+        }
         
         // АСИНХРОННАЯ проверка (не блокирует UI)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -471,6 +486,7 @@ class HotkeyBlockerManager: ObservableObject {
         
         let requiredHold = TimeInterval(delay)
         cmdQHoldStartedAt = Date()
+        cmdQHoldTargetBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? currentAppBundleID
         cmdQHoldCompleted = false
         debugLog("  📱 Showing HUD for \(delay)s hold")
         showHUD(delayTime: requiredHold, hotkey: "Cmd+Q")
@@ -554,6 +570,7 @@ class HotkeyBlockerManager: ObservableObject {
         
         let requiredHold = TimeInterval(delay)
         cmdWHoldStartedAt = Date()
+        cmdWHoldTargetBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? currentAppBundleID
         cmdWHoldCompleted = false
         debugLog("  📱 Showing HUD for \(delay)s hold")
         showHUD(delayTime: requiredHold, hotkey: "Cmd+W")
@@ -632,6 +649,7 @@ class HotkeyBlockerManager: ObservableObject {
         cmdQHoldTimer?.cancel()
         cmdQHoldTimer = nil
         cmdQHoldStartedAt = nil
+        cmdQHoldTargetBundleID = nil
         cmdQHoldCompleted = false
         hideHUD()
     }
@@ -640,6 +658,7 @@ class HotkeyBlockerManager: ObservableObject {
         cmdWHoldTimer?.cancel()
         cmdWHoldTimer = nil
         cmdWHoldStartedAt = nil
+        cmdWHoldTargetBundleID = nil
         cmdWHoldCompleted = false
         hideHUD()
     }
@@ -728,8 +747,7 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     private func showHUD(delayTime: TimeInterval, hotkey: String) {
-        // Show HUD using NotificationManager
-        DispatchQueue.main.async {
+        runOnMain {
             self.notificationManager.showHUD(
                 text: "Hold \(hotkey) for \(self.delay) seconds to \(hotkey.contains("Q") ? "quit" : "close")",
                 icon: "🔒",
@@ -739,8 +757,16 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     private func hideHUD() {
-        DispatchQueue.main.async {
+        runOnMain {
             self.notificationManager.dismissHUD()
+        }
+    }
+
+    private func runOnMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
         }
     }
     
