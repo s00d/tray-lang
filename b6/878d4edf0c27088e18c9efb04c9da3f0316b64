@@ -1,0 +1,37 @@
+tray-lang/Sources/UI/DefaultLayoutsView.swift
+  s_aada1954fa2a15::t_6e6303b824390f 8,10-17,28-47,51-54,57-58,60,69,82,94,96-102,109,115,120,122,128-130,137,151,157,165,167,171,173-174
+tray-lang/Sources/UI/ContentView.swift
+  s_aada1954fa2a15::t_5a6573a2efaf22 24,44,49,58-59,66-89
+  s_aada1954fa2a15::t_6eb745708c537b 90-91
+tray-lang/Sources/UI/ExclusionsView.swift
+  s_aada1954fa2a15::t_ee81f1c22eb4da 10,12-24,28-34,36-37,40-41,43,53-54
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_c47699cc9abbec 20,22
+tray-lang/Sources/UI/HotKeyEditorView.swift
+  s_aada1954fa2a15::t_7754b6f2d174b4 17-19,21-23,25-30,32-35,38-62,64-66,69-75,77-84,86-88,92-95,98-99,105,113,115,122,136,138,140,143,148,150,156,167,172,176,179,181,186,191
+tray-lang/Sources/UI/SymbolsEditorView.swift
+  s_aada1954fa2a15::t_0e725a6283efdf 14-22,34-38,41,43,47-49,53-54,58,60-64,79,81,84-125,127,131-132,137,145-147,150,159,161,166,172-175,178-179,183,198-199,209,223,227,232,242
+tray-lang/Sources/UI/Settings/DiagnosticsView.swift
+  s_aada1954fa2a15::t_90ea28673961bb 9-33,36-37
+tray-lang/Sources/UI/Settings/GeneralSettingsView.swift
+  s_aada1954fa2a15::t_64e876e3a62645 66-71,89-94
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_d6732171537fae 434,448
+  s_aada1954fa2a15::t_e54bc2d8f75692 401,415
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b6878d4edf0c27088e18c9efb04c9da3f0316b64",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
