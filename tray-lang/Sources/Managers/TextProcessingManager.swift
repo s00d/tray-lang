@@ -8,6 +8,12 @@ enum ProcessingAction {
 }
 
 class TextProcessingManager: ObservableObject {
+    /// In-process read/replace for integration tests — no Accessibility / CGEvent needed.
+    struct InProcessSelectionBridge {
+        let getSelectedText: () -> String?
+        let replaceSelectedText: (String) -> Bool
+    }
+
     private struct ClipboardSnapshot {
         let items: [NSPasteboardItem]
         let changeCount: Int
@@ -19,6 +25,9 @@ class TextProcessingManager: ObservableObject {
     private let notificationManager: NotificationManager
     
     private var isProcessing = false
+
+    /// When set (tests only), conversion uses this bridge instead of AX / clipboard.
+    var inProcessSelectionBridgeForTesting: InProcessSelectionBridge?
     
     init(
         textTransformer: TextTransformer,
@@ -40,6 +49,11 @@ class TextProcessingManager: ObservableObject {
             return
         }
         isProcessing = true
+
+        if let bridge = inProcessSelectionBridgeForTesting {
+            processViaInProcessBridge(action: action, bridge: bridge)
+            return
+        }
         
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
               let bundleID = frontmostApp.bundleIdentifier else {
@@ -58,6 +72,39 @@ class TextProcessingManager: ObservableObject {
         }
         
         attemptAccessibilityStrategy(action: action, snapshot: snapshot)
+    }
+
+    private func processViaInProcessBridge(action: ProcessingAction, bridge: InProcessSelectionBridge) {
+        debugLog("🧪 Using in-process selection bridge (no AX)")
+
+        guard let selectedText = bridge.getSelectedText(), !selectedText.isEmpty else {
+            debugLog("🧪 Bridge: no selected text")
+            finishProcessing()
+            return
+        }
+
+        let cleanText = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transformed: String
+        switch action {
+        case .changeLayout:
+            transformed = textTransformer.transformText(cleanText)
+        case .fixSpelling:
+            transformed = spellCheckManager.fixText(cleanText)
+        }
+
+        if transformed == cleanText {
+            finishProcessing()
+            return
+        }
+
+        guard bridge.replaceSelectedText(transformed) else {
+            debugLog("🧪 Bridge: replace failed")
+            finishProcessing()
+            return
+        }
+
+        // Skip system layout switch in tests — fixture only validates text transform/replace.
+        finishProcessing()
     }
     
     // MARK: - Terminal Logic

@@ -1,4 +1,5 @@
 import AppKit
+@testable import tray_lang
 
 /// In-process fixture window for conversion / HUD integration tests.
 @MainActor
@@ -25,6 +26,37 @@ final class ConversionFixtureWindow {
             return textView?.string ?? ""
         case .webView:
             return ""
+        }
+    }
+
+    /// Installs a bridge so `TextProcessingManager` converts this field without AX / Cmd+C/V.
+    func installSelectionBridge(on manager: TextProcessingManager) {
+        manager.inProcessSelectionBridgeForTesting = .init(
+            getSelectedText: { [weak self] in
+                guard let self else { return nil }
+                let text = self.currentText
+                return text.isEmpty ? nil : text
+            },
+            replaceSelectedText: { [weak self] newText in
+                guard let self else { return false }
+                self.replaceCurrentText(newText)
+                return true
+            }
+        )
+    }
+
+    func uninstallSelectionBridge(from manager: TextProcessingManager) {
+        manager.inProcessSelectionBridgeForTesting = nil
+    }
+
+    func replaceCurrentText(_ text: String) {
+        switch mode {
+        case .textField:
+            textField?.stringValue = text
+        case .textView:
+            textView?.string = text
+        case .webView:
+            break
         }
     }
 

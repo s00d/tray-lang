@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import XCTest
 @testable import tray_lang
 
@@ -29,6 +28,9 @@ final class ConversionIntegrationTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        if let fixture, let coordinator {
+            fixture.uninstallSelectionBridge(from: coordinator.textProcessingManager)
+        }
         fixture?.close()
         fixture = nil
         HUDAlertManager.shared.dismissHUD(fade: false)
@@ -76,17 +78,11 @@ final class ConversionIntegrationTests: XCTestCase {
         )
     }
 
-    // MARK: - Fixture conversion (requires real AX on test host)
+    // MARK: - Fixture conversion (in-process bridge — no system Accessibility)
 
-    func testTextFieldConversionViaProcessSelectedText() throws {
-        try XCTSkipUnless(
-            AXIsProcessTrusted(),
-            "Test host needs Accessibility to replace AX selected text"
-        )
-
+    func testTextFieldConversionViaProcessSelectedText() {
         grantAccessibilityForTesting()
 
-        // Ensure Russian profile is active for known mapping пше ↔ git
         let profiles = coordinator.textTransformer.profiles
         guard let russian = profiles.first(where: { $0.name == "Russian (QWERTY ↔ ЙЦУКЕН)" }) else {
             return XCTFail("Russian profile missing")
@@ -96,29 +92,18 @@ final class ConversionIntegrationTests: XCTestCase {
         fixture = ConversionFixtureWindow(mode: .textField)
         fixture.show(withText: "пше")
         fixture.selectAll()
+        fixture.installSelectionBridge(on: coordinator.textProcessingManager)
 
         let expected = coordinator.textTransformer.transformText("пше")
         XCTAssertEqual(expected, "git")
 
         coordinator.textProcessingManager.processSelectedText(action: .changeLayout)
+        fixture.pumpRunLoop(for: 0.05)
 
-        // Mode 1/2/3 may take a moment on main
-        var observed = fixture.currentText
-        let deadline = Date().addingTimeInterval(2.0)
-        while observed == "пше", Date() < deadline {
-            fixture.pumpRunLoop(for: 0.05)
-            observed = fixture.currentText
-        }
-
-        XCTAssertEqual(observed, expected, "Selected text in fixture field should convert")
+        XCTAssertEqual(fixture.currentText, expected, "Selected text in fixture field should convert")
     }
 
-    func testTextViewRoundTripViaTriggerConversion() throws {
-        try XCTSkipUnless(
-            AXIsProcessTrusted(),
-            "Test host needs Accessibility to replace AX selected text"
-        )
-
+    func testTextViewRoundTripViaTriggerConversion() {
         grantAccessibilityForTesting()
         let profiles = coordinator.textTransformer.profiles
         guard let russian = profiles.first(where: { $0.name == "Russian (QWERTY ↔ ЙЦУКЕН)" }) else {
@@ -129,34 +114,23 @@ final class ConversionIntegrationTests: XCTestCase {
         fixture = ConversionFixtureWindow(mode: .textView)
         fixture.show(withText: "git")
         fixture.selectAll()
+        fixture.installSelectionBridge(on: coordinator.textProcessingManager)
 
         coordinator.triggerConversionForTesting(.changeLayout)
+        // triggerConversion schedules processSelectedText asynchronously
+        fixture.pumpRunLoop(for: 0.2)
 
-        var once = fixture.currentText
-        let deadline = Date().addingTimeInterval(2.0)
-        while once == "git", Date() < deadline {
-            fixture.pumpRunLoop(for: 0.05)
-            once = fixture.currentText
-        }
-
-        XCTAssertEqual(once, "пше")
+        XCTAssertEqual(fixture.currentText, "пше")
         XCTAssertFalse(
-            coordinator.notificationManager.isHUDVisibleForTesting
-                || (coordinator.notificationManager.hudTextForTesting == "Converting layout..."
-                    && coordinator.notificationManager.isHUDVisibleForTesting),
+            coordinator.notificationManager.isHUDVisibleForTesting,
             "HUD should be dismissed after processing finishes"
         )
 
         // Second pass restores Latin
         fixture.selectAll()
         coordinator.triggerConversionForTesting(.changeLayout)
-        var twice = fixture.currentText
-        let deadline2 = Date().addingTimeInterval(2.0)
-        while twice == "пше", Date() < deadline2 {
-            fixture.pumpRunLoop(for: 0.05)
-            twice = fixture.currentText
-        }
-        XCTAssertEqual(twice, "git")
+        fixture.pumpRunLoop(for: 0.2)
+        XCTAssertEqual(fixture.currentText, "git")
     }
 
     func testWebViewModeIsSkippedPlaceholder() throws {
