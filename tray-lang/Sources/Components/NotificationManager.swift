@@ -208,20 +208,24 @@ class HUDAlertManager {
         window.setFrame(newRect, display: true)
 
         // Show without becoming key / activating the app
-        window.alphaValue = 0
-        window.orderFrontRegardless()
-
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.2
-            window.animator().alphaValue = 1.0
-        })
-
-        // Auto-dismiss after delay if specified
-        if let delayTime = delayTime {
-            delayer = DispatchWorkItem {
-                self.dismissHUD()
+        if delayTime != nil {
+            // Timed HUD (hold-to-quit): fade in, auto-dismiss
+            window.alphaValue = 0
+            window.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.2
+                window.animator().alphaValue = 1.0
+            })
+            delayer = DispatchWorkItem { [weak self] in
+                self?.dismissHUD()
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + delayTime, execute: delayer!)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delayTime!, execute: delayer!)
+        } else {
+            // Conversion HUD: show immediately at full opacity; caller dismisses when done.
+            // Mode 3 (clipboard) blocks main with usleep — fade-in never paints otherwise.
+            window.alphaValue = 1.0
+            window.orderFrontRegardless()
+            window.displayIfNeeded()
         }
     }
 

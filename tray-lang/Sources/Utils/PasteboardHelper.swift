@@ -3,20 +3,20 @@ import AppKit
 
 /// Helper for optimized pasteboard operations with exponential backoff
 class PasteboardHelper {
-    /// Wait for pasteboard change with exponential backoff
+    /// Wait for pasteboard change with exponential backoff.
+    /// Pumps the run loop so UI (conversion HUD) can stay visible during mode-3 waits.
     static func waitForPasteboardChange(originalCount: Int, timeout: TimeInterval = 0.3) -> Bool {
         let startTime = Date()
-        var delay: useconds_t = 1000 // Начинаем с 1мс
+        var delay: TimeInterval = 0.001
         
         while Date().timeIntervalSince(startTime) < timeout {
             if NSPasteboard.general.changeCount != originalCount {
                 return true
             }
             
-            usleep(delay) // Спим, не нагружая CPU
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(delay))
             
-            // Постепенно увеличиваем интервал опроса (backoff), но не более 20мс
-            if delay < 20000 {
+            if delay < 0.02 {
                 delay *= 2
             }
         }

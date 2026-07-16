@@ -16,6 +16,7 @@ class TextProcessingManager: ObservableObject {
     private let textTransformer: TextTransformer
     private let keyboardLayoutManager: KeyboardLayoutManager
     private let spellCheckManager: SpellCheckManager
+    private let notificationManager: NotificationManager
     
     private var isProcessing = false
     
@@ -36,11 +37,13 @@ class TextProcessingManager: ObservableObject {
     init(
         textTransformer: TextTransformer,
         keyboardLayoutManager: KeyboardLayoutManager,
-        spellCheckManager: SpellCheckManager
+        spellCheckManager: SpellCheckManager,
+        notificationManager: NotificationManager
     ) {
         self.textTransformer = textTransformer
         self.keyboardLayoutManager = keyboardLayoutManager
         self.spellCheckManager = spellCheckManager
+        self.notificationManager = notificationManager
     }
     
     // MARK: - Main Logic
@@ -340,6 +343,9 @@ class TextProcessingManager: ObservableObject {
     
     private func finishProcessing() {
         isProcessing = false
+        DispatchQueue.main.async { [weak self] in
+            self?.notificationManager.dismissHUD()
+        }
     }
     
     private func waitForModifiersReleased(timeout: TimeInterval = 0.5) {
@@ -351,7 +357,8 @@ class TextProcessingManager: ObservableObject {
             if flags.isDisjoint(with: modifierMask) {
                 return
             }
-            usleep(10000)
+            // Pump run loop so conversion HUD can stay composited during mode-3 waits
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
         }
     }
     

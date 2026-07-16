@@ -45,13 +45,14 @@ class AppCoordinator: ObservableObject {
         self.spellCheckManager = SpellCheckManager()
         self.accessibilityManager = AccessibilityManager()
         self.autoLaunchManager = AutoLaunchManager()
+        self.notificationManager = NotificationManager()
         self.textProcessingManager = TextProcessingManager(
             textTransformer: textTransformer,
             keyboardLayoutManager: keyboardLayoutManager,
-            spellCheckManager: spellCheckManager
+            spellCheckManager: spellCheckManager,
+            notificationManager: notificationManager
         )
         self.smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
-        self.notificationManager = NotificationManager()
         
         // ИСПРАВЛЕНО: Инициализируем exclusionManager и hotkeyBlockerManager явно
         self.exclusionManager = ExclusionManager()
@@ -288,13 +289,13 @@ class AppCoordinator: ObservableObject {
         }
         
         if action == .changeLayout {
-            notificationManager.showHUD(text: "Converting layout...", icon: "🔄", delayTime: 0.5)
+            notificationManager.showHUD(text: "Converting layout...", icon: "🔄")
         } else {
-            notificationManager.showHUD(text: "Fixing spelling...", icon: "✨", delayTime: 0.5)
+            notificationManager.showHUD(text: "Fixing spelling...", icon: "✨")
         }
         
-        // Defer processing so HUD fade-in can paint before AX/clipboard work blocks the main thread
-        DispatchQueue.main.async { [weak self] in
+        // Let the opaque HUD composite before mode-3 clipboard waits block the main thread
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.textProcessingManager.processSelectedText(action: action)
         }
     }
