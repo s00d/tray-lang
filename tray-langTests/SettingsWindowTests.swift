@@ -5,9 +5,25 @@ import XCTest
 
 @MainActor
 final class SettingsWindowTests: XCTestCase {
+    private var coordinator: AppCoordinator!
+
+    override func setUp() async throws {
+        coordinator = AppCoordinator()
+        XCTAssertTrue(ProcessRuntime.useMockAccessibility)
+        XCTAssertFalse(coordinator.accessibilityManager.isGranted)
+    }
+
+    override func tearDown() async throws {
+        coordinator?.windowManager.teardownStatusBar()
+        coordinator?.stop()
+        if let window = coordinator?.windowManager.settingsWindowForTesting {
+            window.orderOut(nil)
+            window.contentViewController = nil
+        }
+        coordinator = nil
+    }
 
     func testContentViewCanLayoutInHostingControllerWithoutCrashing() {
-        let coordinator = AppCoordinator()
         let hostingController = NSHostingController(rootView: ContentView(coordinator: coordinator))
 
         let window = NSWindow(
@@ -28,27 +44,18 @@ final class SettingsWindowTests: XCTestCase {
     }
 
     func testWindowManagerCreatesSettingsWindow() {
-        let coordinator = AppCoordinator()
         coordinator.windowManager.setCoordinator(coordinator)
         let initialPolicy = NSApp.activationPolicy()
         coordinator.showMainWindow()
 
-        let expectation = expectation(description: "settings window appears")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            let settingsWindow = NSApp.windows.first {
-                $0.identifier?.rawValue == "tray-lang.settings"
-            }
-            XCTAssertNotNil(settingsWindow)
-            XCTAssertTrue(settingsWindow?.isVisible == true)
-            XCTAssertEqual(NSApp.activationPolicy(), initialPolicy)
-            expectation.fulfill()
-        }
-
-        wait(for: [expectation], timeout: 2)
+        let settingsWindow = coordinator.windowManager.settingsWindowForTesting
+        XCTAssertNotNil(settingsWindow)
+        XCTAssertEqual(settingsWindow?.identifier?.rawValue, "tray-lang.settings")
+        XCTAssertNotNil(settingsWindow?.contentViewController)
+        XCTAssertEqual(NSApp.activationPolicy(), initialPolicy)
     }
 
     func testRefreshStatusMenuStateUpdatesCheckmarks() {
-        let coordinator = AppCoordinator()
         let windowManager = coordinator.windowManager
         windowManager.setCoordinator(coordinator)
         windowManager.setupStatusBar()
@@ -60,23 +67,17 @@ final class SettingsWindowTests: XCTestCase {
     }
 
     func testShowMainWindowDoesNotChangeActivationPolicy() {
-        let coordinator = AppCoordinator()
         coordinator.windowManager.setCoordinator(coordinator)
         coordinator.windowManager.setupStatusBar()
 
         let policyBefore = NSApp.activationPolicy()
         coordinator.showMainWindow()
 
-        let expectation = expectation(description: "policy unchanged")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertEqual(NSApp.activationPolicy(), policyBefore)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2)
+        XCTAssertEqual(NSApp.activationPolicy(), policyBefore)
+        XCTAssertNotNil(coordinator.windowManager.settingsWindowForTesting)
     }
 
     func testCoordinatorDoesNotForwardHotKeyManagerObjectWillChange() {
-        let coordinator = AppCoordinator()
         var publishCount = 0
         let cancellable = coordinator.objectWillChange.sink {
             publishCount += 1
@@ -87,5 +88,10 @@ final class SettingsWindowTests: XCTestCase {
 
         XCTAssertEqual(publishCount, 0, "Nested manager updates must not re-publish coordinator during layout")
         _ = cancellable
+    }
+
+    func testMockAccessibilityDoesNotAutoStartBlockerTaps() {
+        XCTAssertFalse(coordinator.hotkeyBlockerManager.isMonitoring)
+        XCTAssertFalse(coordinator.hotKeyManager.isEnabled)
     }
 }

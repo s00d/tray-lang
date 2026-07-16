@@ -27,7 +27,10 @@ struct KeyboardMapping {
     
     static func createInverseMapping(from mapping: [String: String]) -> [String: String] {
         var inverse: [String: String] = [:]
-        for (from, to) in mapping {
+        // Сортируем ключи: коллизии целей (напр. @ и } → ") разрешаются стабильно.
+        // "@" (ASCII 64) раньше "}" (125) → для белорусского обратный маппинг предпочитает @.
+        for from in mapping.keys.sorted() {
+            guard let to = mapping[from] else { continue }
             if inverse[to] == nil {
                 inverse[to] = from
             }

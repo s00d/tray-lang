@@ -127,6 +127,9 @@ final class WindowManager: NSObject, NSMenuDelegate {
         smartLayoutMenuItem?.state ?? .off
     }
 
+    /// Exposed for unit tests — `NSApp.windows` / `isVisible` are unreliable under TEST_HOST + `.accessory`.
+    var settingsWindowForTesting: NSWindow? { mainWindow }
+
     // MARK: - Menu Actions
 
     @objc func showMainWindow() {

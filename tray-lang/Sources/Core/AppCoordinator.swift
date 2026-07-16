@@ -253,11 +253,14 @@ class AppCoordinator: ObservableObject {
     func start() {
         debugLog("🚀 Приложение запущено")
         textTransformer.loadProfiles()
-        
-        // УЛУЧШЕНО: Таймер-костыль удален! AccessibilityManager теперь сам мониторит через Combine
-        // Запускаем первую проверку с небольшой задержкой для инициализации UI
+
+        guard !ProcessRuntime.shouldSkipAccessibilityPrompt else {
+            debugLog("🧪 Skipping accessibility prompt / auto-request (test mode)")
+            return
+        }
+
+        // AccessibilityManager monitors via Combine; request once if still denied.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Если прав нет, запрашиваем их
             if !self.isAccessibilityGranted {
                 Task {
                     await self.accessibilityManager.requestPermissions()
@@ -294,10 +297,15 @@ class AppCoordinator: ObservableObject {
             notificationManager.showHUD(text: "Fixing spelling...", icon: "✨")
         }
         
-        // Let the opaque HUD composite before mode-3 clipboard waits block the main thread
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        // HUD is already opaque; start processing on next turn without extra delay
+        DispatchQueue.main.async { [weak self] in
             self?.textProcessingManager.processSelectedText(action: action)
         }
+    }
+
+    /// Same path as a real layout/spell hotkey — for integration tests.
+    func triggerConversionForTesting(_ action: ProcessingAction) {
+        handleHotKeyPressed(action: action)
     }
     
     // MARK: - Public Interface

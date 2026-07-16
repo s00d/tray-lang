@@ -44,6 +44,9 @@ class HotkeyBlockerManager: ObservableObject {
     
     private let notificationManager: NotificationManager
     private let exclusionManager: ExclusionManager
+
+    /// When true, completed holds do not terminate apps / post Cmd+W (integration tests).
+    var suppressSideEffectsForTesting = false
     
     init(notificationManager: NotificationManager, exclusionManager: ExclusionManager) {
         self.notificationManager = notificationManager
@@ -294,41 +297,114 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     // MARK: - Event Handling
+
+    /// Synthetic key path for tests — same swallow/pass semantics as the CGEvent taps.
+    /// Returns `true` when the key would be blocked (event swallowed).
+    @discardableResult
+    func handleSyntheticKeyDown(
+        keyCode: Int,
+        commandDown: Bool,
+        shiftDown: Bool = false,
+        controlDown: Bool = false,
+        isAutorepeat: Bool = false
+    ) -> Bool {
+        processKeyDown(
+            keyCode: keyCode,
+            commandDown: commandDown,
+            shiftDown: shiftDown,
+            controlDown: controlDown,
+            isAutorepeat: isAutorepeat
+        ) == .swallowed
+    }
+
+    @discardableResult
+    func handleSyntheticKeyUp(
+        keyCode: Int,
+        commandDown: Bool,
+        shiftDown: Bool = false,
+        controlDown: Bool = false
+    ) -> Bool {
+        processKeyUp(
+            keyCode: keyCode,
+            commandDown: commandDown,
+            shiftDown: shiftDown,
+            controlDown: controlDown
+        ) == .swallowed
+    }
+
+    private enum KeyDisposition {
+        case passThrough
+        case swallowed
+    }
+
+    private func processKeyDown(
+        keyCode: Int,
+        commandDown: Bool,
+        shiftDown: Bool,
+        controlDown: Bool,
+        isAutorepeat: Bool
+    ) -> KeyDisposition {
+        debugLog("🔍 HotkeyBlocker: KeyDown event received")
+        debugLog("  📋 Cmd: \(commandDown) Shift: \(shiftDown) Control: \(controlDown) KeyCode: \(keyCode)")
+
+        guard commandDown else {
+            debugLog("  ❌ No Cmd key, passing through")
+            return .passThrough
+        }
+
+        guard !shiftDown && !controlDown else {
+            debugLog("  ❌ Shift or Control pressed, passing through")
+            return .passThrough
+        }
+
+        if keyCode == 12 && isCmdQEnabled {
+            return handleCmdQDown(isAutorepeat: isAutorepeat)
+        }
+
+        if keyCode == 13 && isCmdWEnabled {
+            return handleCmdWDown(isAutorepeat: isAutorepeat)
+        }
+
+        debugLog("  ❌ Not Q or W key, passing through")
+        return .passThrough
+    }
+
+    private func processKeyUp(
+        keyCode: Int,
+        commandDown: Bool,
+        shiftDown: Bool,
+        controlDown: Bool
+    ) -> KeyDisposition {
+        debugLog("🔍 HotkeyBlocker: KeyUp event received")
+
+        guard commandDown else { return .passThrough }
+        guard !shiftDown && !controlDown else { return .passThrough }
+
+        if keyCode == 12 && isCmdQEnabled {
+            handleCmdQUp()
+            return .passThrough
+        }
+
+        if keyCode == 13 && isCmdWEnabled {
+            handleCmdWUp()
+            return .passThrough
+        }
+
+        return .passThrough
+    }
+
     func handleKeyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         let flags = event.flags
         let keyCode = getKeyCode(from: event)
-        
-        debugLog("🔍 HotkeyBlocker: KeyDown event received")
-        debugLog("  📋 Flags: \(flags)")
-        debugLog("  📋 Cmd: \(flags.contains(.maskCommand))")
-        debugLog("  📋 Shift: \(flags.contains(.maskShift))")
-        debugLog("  📋 Control: \(flags.contains(.maskControl))")
-        debugLog("  📋 KeyCode: \(keyCode)")
-        
-        // Check if Cmd key was pressed
-        guard flags.contains(.maskCommand) else {
-            debugLog("  ❌ No Cmd key, passing through")
-            return Unmanaged.passUnretained(event)
-        }
-        
-        // Ignore if Shift or Control is also pressed
-        guard !flags.contains(.maskShift) && !flags.contains(.maskControl) else {
-            debugLog("  ❌ Shift or Control pressed, passing through")
-            return Unmanaged.passUnretained(event)
-        }
-        
-        // Handle Cmd+Q
-        if keyCode == 12 && isCmdQEnabled { // 12 is the keycode for Q
-            return handleCmdQDown(event)
-        }
-        
-        // Handle Cmd+W
-        if keyCode == 13 && isCmdWEnabled { // 13 is the keycode for W
-            return handleCmdWDown(event)
-        }
-        
-        debugLog("  ❌ Not Q or W key, passing through")
-        return Unmanaged.passUnretained(event)
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        let disposition = processKeyDown(
+            keyCode: keyCode,
+            commandDown: flags.contains(.maskCommand),
+            shiftDown: flags.contains(.maskShift),
+            controlDown: flags.contains(.maskControl),
+            isAutorepeat: isRepeat
+        )
+        return disposition == .swallowed ? nil : Unmanaged.passUnretained(event)
     }
     
     // Обработка отключения Event Tap системой (используется в callback, не может быть private)
@@ -365,34 +441,33 @@ class HotkeyBlockerManager: ObservableObject {
         return isCmdQActive(for: app)
     }
     
-    private func handleCmdQDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handleCmdQDown(isAutorepeat: Bool) -> KeyDisposition {
         debugLog("  ✅ Cmd+Q detected!")
         
         // Быстрая проверка исключений по строке (без API вызовов)
         if let bundleID = currentAppBundleID, exclusionManager.isAppExcluded(bundleID: bundleID) {
             debugLog("  ⚠️ Current app is excluded from protection")
-            return Unmanaged.passUnretained(event)
+            return .passThrough
         }
         
         // Читаем кэшированное значение (мгновенно)
         if !currentAppSupportsCmdQ {
             debugLog("  ❌ Cmd+Q not active for this app (cached), passing through")
-            return Unmanaged.passUnretained(event)
+            return .passThrough
         }
         
         // Check canQuit first
         guard canQuit else {
             debugLog("  ❌ Not allowed to quit yet")
-            return nil
+            return .swallowed
         }
         
-        // Already holding — wait for timer / keyUp
-        if cmdQHoldStartedAt != nil {
-            return nil
+        guard HoldDurationLogic.shouldBeginHold(
+            isAlreadyHolding: cmdQHoldStartedAt != nil,
+            isAutorepeat: isAutorepeat
+        ) else {
+            return .swallowed
         }
-        
-        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        guard !isRepeat else { return nil }
         
         let requiredHold = TimeInterval(delay)
         cmdQHoldStartedAt = Date()
@@ -406,16 +481,26 @@ class HotkeyBlockerManager: ObservableObject {
         cmdQHoldTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + requiredHold, execute: work)
         
-        return nil
+        return .swallowed
     }
     
     private func completeCmdQHold() {
-        guard cmdQHoldStartedAt != nil, !cmdQHoldCompleted, canQuit else { return }
+        guard let startedAt = cmdQHoldStartedAt, !cmdQHoldCompleted, canQuit else { return }
+        guard HoldDurationLogic.hasHeldLongEnough(
+            startedAt: startedAt,
+            now: Date(),
+            requiredSeconds: TimeInterval(delay)
+        ) else { return }
         
         debugLog("🔓 HotkeyBlocker: Quit allowed after holding for \(delay) seconds")
         cmdQHoldCompleted = true
         canQuit = false
         hideHUD()
+
+        if suppressSideEffectsForTesting {
+            debugLog("🧪 HotkeyBlocker: suppressSideEffectsForTesting — skip terminate")
+            return
+        }
         
         guard let currentApp = NSWorkspace.shared.menuBarOwningApplication else { return }
         
@@ -447,25 +532,25 @@ class HotkeyBlockerManager: ObservableObject {
         }
     }
     
-    private func handleCmdWDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handleCmdWDown(isAutorepeat: Bool) -> KeyDisposition {
         debugLog("  ✅ Cmd+W detected!")
         
         if exclusionManager.isCurrentAppExcluded() {
             debugLog("  ⚠️ Current app is excluded from protection")
-            return Unmanaged.passUnretained(event)
+            return .passThrough
         }
         
         guard canClose else {
             debugLog("  ❌ Not allowed to close yet")
-            return nil
+            return .swallowed
         }
         
-        if cmdWHoldStartedAt != nil {
-            return nil
+        guard HoldDurationLogic.shouldBeginHold(
+            isAlreadyHolding: cmdWHoldStartedAt != nil,
+            isAutorepeat: isAutorepeat
+        ) else {
+            return .swallowed
         }
-        
-        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        guard !isRepeat else { return nil }
         
         let requiredHold = TimeInterval(delay)
         cmdWHoldStartedAt = Date()
@@ -479,16 +564,26 @@ class HotkeyBlockerManager: ObservableObject {
         cmdWHoldTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + requiredHold, execute: work)
         
-        return nil
+        return .swallowed
     }
     
     private func completeCmdWHold() {
-        guard cmdWHoldStartedAt != nil, !cmdWHoldCompleted, canClose else { return }
+        guard let startedAt = cmdWHoldStartedAt, !cmdWHoldCompleted, canClose else { return }
+        guard HoldDurationLogic.hasHeldLongEnough(
+            startedAt: startedAt,
+            now: Date(),
+            requiredSeconds: TimeInterval(delay)
+        ) else { return }
         
         debugLog("🔓 HotkeyBlocker: Close allowed after holding for \(delay) seconds")
         cmdWHoldCompleted = true
         canClose = false
         hideHUD()
+
+        if suppressSideEffectsForTesting {
+            debugLog("🧪 HotkeyBlocker: suppressSideEffectsForTesting — skip Cmd+W post")
+            return
+        }
         
         debugLog("🚪 HotkeyBlocker: Sending Cmd+W to close window")
         if let newEvent = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true) {
@@ -498,31 +593,18 @@ class HotkeyBlockerManager: ObservableObject {
     }
     
     func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        debugLog("🔍 HotkeyBlocker: KeyUp event received")
-        
         let flags = event.flags
         let keyCode = getKeyCode(from: event)
-        
-        guard flags.contains(.maskCommand) else {
-            return Unmanaged.passUnretained(event)
-        }
-        
-        guard !flags.contains(.maskShift) && !flags.contains(.maskControl) else {
-            return Unmanaged.passUnretained(event)
-        }
-        
-        if keyCode == 12 && isCmdQEnabled {
-            return handleCmdQUp(event)
-        }
-        
-        if keyCode == 13 && isCmdWEnabled {
-            return handleCmdWUp(event)
-        }
-        
+        _ = processKeyUp(
+            keyCode: keyCode,
+            commandDown: flags.contains(.maskCommand),
+            shiftDown: flags.contains(.maskShift),
+            controlDown: flags.contains(.maskControl)
+        )
         return Unmanaged.passUnretained(event)
     }
     
-    private func handleCmdQUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handleCmdQUp() {
         debugLog("  ✅ KeyUp: Q key detected")
         
         if cmdQHoldStartedAt != nil && !cmdQHoldCompleted {
@@ -532,11 +614,9 @@ class HotkeyBlockerManager: ObservableObject {
         
         cancelCmdQHold()
         canQuit = true
-        
-        return Unmanaged.passUnretained(event)
     }
     
-    private func handleCmdWUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handleCmdWUp() {
         debugLog("  ✅ KeyUp: W key detected")
         
         if cmdWHoldStartedAt != nil && !cmdWHoldCompleted {
@@ -546,8 +626,6 @@ class HotkeyBlockerManager: ObservableObject {
         
         cancelCmdWHold()
         canClose = true
-        
-        return Unmanaged.passUnretained(event)
     }
     
     private func cancelCmdQHold() {

@@ -21,7 +21,7 @@ final class SettingsWindowUITests: XCTestCase {
         }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-openSettings"]
+        app.launchArguments = ["-openSettings", "-skipAccessibilityPrompt"]
         app.launch()
 
         let settingsWindow = app.windows.matching(

@@ -20,20 +20,6 @@ class TextProcessingManager: ObservableObject {
     
     private var isProcessing = false
     
-    // Список терминалов
-    private let terminalBundleIDs = [
-        "com.apple.Terminal",
-        "com.googlecode.iterm2",
-        "co.zeit.hyper",
-        "org.alacritty",
-        "io.alacritty",
-        "net.kovidgoyal.kitty",
-        "dev.warp.Warp-Stable",
-        "com.github.wez.wezterm",
-        "com.microsoft.VSCode",
-        "com.googlecode.iterm2-nightly"
-    ]
-    
     init(
         textTransformer: TextTransformer,
         keyboardLayoutManager: KeyboardLayoutManager,
@@ -66,7 +52,7 @@ class TextProcessingManager: ObservableObject {
         // manualDeepCopy reads pasteboard data eagerly; lazy/promised types may not round-trip.
         let snapshot = captureClipboardSnapshot()
         
-        if terminalBundleIDs.contains(bundleID) {
+        if ConversionAppRouting.usesTerminalPath(bundleID: bundleID) {
             handleTerminalProcessing(app: frontmostApp, action: action, snapshot: snapshot)
             return
         }
@@ -97,7 +83,7 @@ class TextProcessingManager: ObservableObject {
             return
         }
         
-        let commandText = extractCommandFromPrompt(lastLine)
+        let commandText = TerminalPromptExtractor.extractCommand(from: lastLine)
         if commandText.isEmpty {
             finishProcessing()
             return
@@ -124,26 +110,6 @@ class TextProcessingManager: ObservableObject {
         }
     }
     
-    private func extractCommandFromPrompt(_ line: String) -> String {
-        var clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        let prompts = ["$ ", "% ", "> ", "# ", "ζ ", ": ", "➜ ", "❯ ", "$", "%", ">", "#", "ζ"]
-        for prompt in prompts {
-            if let range = clean.range(of: prompt, options: .backwards) {
-                clean = String(clean[range.upperBound...])
-                break
-            }
-        }
-        
-        let rightPromptPattern = "\\s{2,}(\\[.*?\\]|\\(.*?\\)|<.*?>|\\d{2}:\\d{2}(:\\d{2})?|[✔✘]).*?$"
-        if let range = clean.range(of: rightPromptPattern, options: .regularExpression) {
-            clean.removeSubrange(range)
-        }
-        
-        let result = clean.trimmingCharacters(in: .whitespaces)
-        return result.isEmpty ? line.trimmingCharacters(in: .whitespaces) : result
-    }
-    
     private func clearTerminalLine(length: Int) {
         let safeLength = min(length, 300)
         sendCtrlKey(14)
@@ -165,7 +131,6 @@ class TextProcessingManager: ObservableObject {
         pasteboard.setString(newText, forType: .string)
         let writtenChangeCount = pasteboard.changeCount
         
-        waitForModifiersReleased()
         performCmdV()
         
         scheduleClipboardRestore(snapshot: snapshot, writtenChangeCount: writtenChangeCount)
@@ -179,14 +144,13 @@ class TextProcessingManager: ObservableObject {
         pasteboard.setString(newText, forType: .string)
         let writtenChangeCount = pasteboard.changeCount
         
-        waitForModifiersReleased()
         performCmdV()
         
         scheduleClipboardRestore(snapshot: snapshot, writtenChangeCount: writtenChangeCount)
     }
     
     private func scheduleClipboardRestore(snapshot: ClipboardSnapshot, writtenChangeCount: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardConversionTiming.clipboardRestoreDelay) { [weak self] in
             debugLog("📋 Restoring clipboard...")
             self?.restoreClipboard(snapshot, ifUnchangedSince: writtenChangeCount)
             self?.finishProcessing()
@@ -297,17 +261,21 @@ class TextProcessingManager: ObservableObject {
         
         debugLog("🎯 Marker Strategy: Set UUID marker")
         
-        waitForModifiersReleased()
         performCmdC()
         
-        guard PasteboardHelper.waitForPasteboardChange(originalCount: markerChangeCount, timeout: 0.5) else {
+        guard PasteboardHelper.waitForPasteboardChange(
+            originalCount: markerChangeCount,
+            timeout: ClipboardConversionTiming.pasteboardChangeTimeout
+        ) else {
             debugLog("⚠️ Marker Strategy: pasteboard did not change after Cmd+C")
             restoreClipboard(snapshot)
             return nil
         }
         
-        guard let currentContent = pasteboard.string(forType: .string),
-              currentContent != marker else {
+        guard let currentContent = ClipboardMarkerLogic.capturedText(
+            marker: marker,
+            pasteboardString: pasteboard.string(forType: .string)
+        ) else {
             debugLog("⚠️ Marker intact after copy. Nothing selected or Copy blocked.")
             restoreClipboard(snapshot)
             return nil
@@ -330,7 +298,10 @@ class TextProcessingManager: ObservableObject {
     private func restoreClipboard(_ snapshot: ClipboardSnapshot, ifUnchangedSince changeCount: Int? = nil) {
         let pasteboard = NSPasteboard.general
         
-        if let changeCount, pasteboard.changeCount != changeCount {
+        if let changeCount, ClipboardMarkerLogic.shouldSkipRestore(
+            currentChangeCount: pasteboard.changeCount,
+            writtenChangeCount: changeCount
+        ) {
             debugLog("📋 Skipping clipboard restore — pasteboard changed externally")
             return
         }
@@ -348,7 +319,11 @@ class TextProcessingManager: ObservableObject {
         }
     }
     
-    private func waitForModifiersReleased(timeout: TimeInterval = 0.5) {
+    /// Wait until Cmd/Shift/Opt/Ctrl are released so synthetic Cmd+C/V is not mangled.
+    /// Polls quickly and exits as soon as flags are clear (typical ~0–50ms after key-up).
+    private func waitForModifiersReleased(
+        timeout: TimeInterval = ClipboardConversionTiming.modifiersTimeout
+    ) {
         let deadline = Date().addingTimeInterval(timeout)
         let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
         
@@ -357,8 +332,7 @@ class TextProcessingManager: ObservableObject {
             if flags.isDisjoint(with: modifierMask) {
                 return
             }
-            // Pump run loop so conversion HUD can stay composited during mode-3 waits
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.002))
         }
     }
     
@@ -375,7 +349,7 @@ class TextProcessingManager: ObservableObject {
         up.flags = .maskCommand
         
         down.post(tap: .cghidEventTap)
-        usleep(5000)
+        usleep(2000)
         up.post(tap: .cghidEventTap)
     }
     
@@ -390,7 +364,7 @@ class TextProcessingManager: ObservableObject {
         up.flags = .maskCommand
         
         down.post(tap: .cghidEventTap)
-        usleep(5000)
+        usleep(2000)
         up.post(tap: .cghidEventTap)
     }
     

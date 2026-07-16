@@ -38,12 +38,22 @@ struct ConversionProfileTemplateTests {
         "Belarusian (QWERTY ↔ Беларуская)",
     ]
 
+    /// Цели, на которые на реальной раскладке претендуют несколько QWERTY-клавиш.
+    /// Обратный маппинг сохраняет первый source (для белорусского: `"` ← `@`, не `}`).
+    private static let sharedForwardTargets: [String: Set<String>] = [
+        "Belarusian (QWERTY ↔ Беларуская)": ["\""],
+    ]
+
     private static let partialTemplateNames: [String] = {
         let full = Set(fullLayoutTemplateNames)
         return languageTemplates.keys.filter { !full.contains($0) }.sorted()
     }()
 
     private static let templateNames: [String] = languageTemplates.keys.sorted()
+
+    private static func isSharedTarget(_ target: String, templateName: String) -> Bool {
+        sharedForwardTargets[templateName]?.contains(target) == true
+    }
 
     // MARK: - По каждому шаблону
 
@@ -65,6 +75,11 @@ struct ConversionProfileTemplateTests {
 
         for (source, target) in pairs {
             #expect(forward[source] == target, "Прямой: \(source) в «\(templateName)»")
+
+            if Self.isSharedTarget(target, templateName: templateName), inverse[target] != source {
+                // Проигрышная клавиша в коллизии (например } при общем ")
+                continue
+            }
 
             let roundTripped = TemplateTestHelpers.applyMapping(target, mapping: inverse)
             #expect(
@@ -102,6 +117,9 @@ struct ConversionProfileTemplateTests {
 
         for (source, target) in pairs {
             if inverse[target] != source {
+                if Self.isSharedTarget(target, templateName: templateName) {
+                    continue
+                }
                 collisions.append("\(target) → \(inverse[target] ?? "∅") (ожидался \(source))")
             }
         }
@@ -134,7 +152,22 @@ struct ConversionProfileTemplateTests {
         let converted = TemplateTestHelpers.applyMapping(keyboard, mapping: forward)
         let restored = TemplateTestHelpers.applyMapping(converted, mapping: inverse)
 
-        #expect(restored == keyboard, "Полная строка клавиатуры не вернулась в «\(templateName)»")
+        if Self.sharedForwardTargets[templateName] == nil {
+            #expect(restored == keyboard, "Полная строка клавиатуры не вернулась в «\(templateName)»")
+        } else {
+            // Все символы кроме проигравших в shared targets должны совпасть.
+            for symbol in Self.usKeyboardSymbols {
+                guard let target = forward[symbol] else { continue }
+                if Self.isSharedTarget(target, templateName: templateName), inverse[target] != symbol {
+                    continue
+                }
+                let roundTripped = TemplateTestHelpers.applyMapping(
+                    TemplateTestHelpers.applyMapping(symbol, mapping: forward),
+                    mapping: inverse
+                )
+                #expect(roundTripped == symbol, "Символ \(symbol) не вернулся в «\(templateName)»")
+            }
+        }
     }
 
     @Test(arguments: partialTemplateNames)
@@ -173,5 +206,27 @@ struct ConversionProfileTemplateTests {
         #expect(forward["."] == "ю")
         #expect(inverse["."] == "/")
         #expect(inverse["ю"] == ".")
+    }
+
+    @Test func russianTemplateBackslashAndPipeMatchRussianWin() throws {
+        let pairs = try #require(languageTemplates["Russian (QWERTY ↔ ЙЦУКЕН)"])
+        let forward = TemplateTestHelpers.forwardMapping(from: pairs)
+        let inverse = TemplateTestHelpers.inverseMapping(from: pairs)
+
+        #expect(forward["\\"] == "\\")
+        #expect(forward["|"] == "/")
+        #expect(inverse["\\"] == "\\")
+        #expect(inverse["/"] == "|")
+    }
+
+    @Test func ukrainianTemplateMatchesUkrainianPCBracketsAndSlash() throws {
+        let pairs = try #require(languageTemplates["Ukrainian (QWERTY ↔ ЙЦУКЕН)"])
+        let forward = TemplateTestHelpers.forwardMapping(from: pairs)
+
+        #expect(forward["["] == "х")
+        #expect(forward["]"] == "ї")
+        #expect(forward["\\"] == "ʼ")
+        #expect(forward["|"] == "₴")
+        #expect(forward["?"] == ",")
     }
 }

@@ -22,13 +22,9 @@ final class TrayLangApplication {
 }
 
 enum SingleInstanceGuard {
-    private static var isRunningUnderTests: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-    }
-
     @discardableResult
     static func activateExistingInstanceIfNeeded() -> Bool {
-        if isRunningUnderTests {
+        if ProcessRuntime.isRunningUnderTests {
             return false
         }
 

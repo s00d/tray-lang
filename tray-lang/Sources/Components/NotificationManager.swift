@@ -84,6 +84,8 @@ class HUDAlertView: NSView {
         textLabel.stringValue = text
         iconLabel.stringValue = icon
     }
+
+    var currentTextForTesting: String { textLabel.stringValue }
     
     func startProgress(duration: TimeInterval) {
         totalDuration = duration
@@ -153,6 +155,7 @@ class HUDAlertManager {
 
     private var window: HUDPanel
     private var delayer: DispatchWorkItem?
+    private var isPresentedForTesting = false
 
     private init() {
         window = HUDPanel(
@@ -174,16 +177,28 @@ class HUDAlertManager {
 
         let hudView = HUDAlertView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
         window.contentView = hudView
+        window.identifier = NSUserInterfaceItemIdentifier("tray-lang.hud")
+        window.setAccessibilityIdentifier("tray-lang.hud")
+    }
+
+    /// Visible to unit/UI tests (nonactivating panel is otherwise hard to assert).
+    var isHUDVisibleForTesting: Bool { isPresentedForTesting }
+
+    private(set) var lastShownTextForTesting: String?
+
+    var hudTextForTesting: String? {
+        lastShownTextForTesting ?? (window.contentView as? HUDAlertView)?.currentTextForTesting
     }
 
     func showHUD(text: String, icon: String = "🔒", delayTime: TimeInterval? = nil) {
-        guard let screenRect = NSScreen.main?.visibleFrame else {
-            print("Could not get screen frame")
-            return
-        }
+        let screenRect = NSScreen.main?.visibleFrame
+            ?? NSScreen.screens.first?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 800, height: 600)
 
         // Cancel previous delay if exists
         delayer?.cancel()
+        lastShownTextForTesting = text
+        isPresentedForTesting = true
 
         // Update HUD content
         if let hudView = window.contentView as? HUDAlertView {
@@ -231,6 +246,7 @@ class HUDAlertManager {
 
     func dismissHUD(fade: Bool = true) {
         delayer?.cancel()
+        isPresentedForTesting = false
 
         // Stop progress bar
         if let hudView = window.contentView as? HUDAlertView {
@@ -239,6 +255,7 @@ class HUDAlertManager {
 
         guard fade else {
             window.orderOut(nil)
+            window.alphaValue = 0
             return
         }
 
@@ -253,6 +270,9 @@ class HUDAlertManager {
 
 // MARK: - Notification Manager
 class NotificationManager: ObservableObject {
+    var isHUDVisibleForTesting: Bool { HUDAlertManager.shared.isHUDVisibleForTesting }
+    var hudTextForTesting: String? { HUDAlertManager.shared.hudTextForTesting }
+
     // MARK: - HUD Notifications
     func showHUD(text: String, icon: String = "ℹ️", delayTime: TimeInterval? = nil) {
         HUDAlertManager.shared.showHUD(text: text, icon: icon, delayTime: delayTime)
@@ -264,6 +284,11 @@ class NotificationManager: ObservableObject {
 
     // MARK: - Alert Dialogs
     func showAlert(title: String, message: String, style: NSAlert.Style = .informational) {
+        // Modal alerts hang XCTest / Swift Testing hosts.
+        if ProcessRuntime.isRunningUnderTests {
+            debugLog("🧪 Skipping alert under tests: \(title) — \(message)")
+            return
+        }
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = title

@@ -3,60 +3,68 @@ import AppKit
 import ApplicationServices
 import Combine
 
-/// УЛУЧШЕННЫЙ AccessibilityManager с реактивным мониторингом
-/// Использует Combine для автоматического обновления состояния прав доступа
+/// Checks / requests Accessibility trust. Under tests uses a mock — no system prompt.
 @MainActor
 class AccessibilityManager: ObservableObject {
-    // НОВОЕ: Это свойство "живое". UI автоматически подпишется и обновится
     @Published var isGranted: Bool = false
-    
+
     private var checkTimer: AnyCancellable?
-    
-    init() {
-        // 1. Первая проверка при запуске
+    private let usesMock: Bool
+
+    init(usesMock: Bool = ProcessRuntime.useMockAccessibility) {
+        self.usesMock = usesMock
+
+        if usesMock {
+            // Tests: never prompt the OS. Keep denied so we don't auto-start CGEvent taps.
+            isGranted = false
+            debugLog("✅ AccessibilityManager mock mode (tests) — no prompts, isGranted=false")
+            return
+        }
+
         checkStatus()
-        
-        // 2. Запускаем "сердцебиение" (Polling)
-        // Проверяем статус каждую секунду. Это ничтожная нагрузка на CPU (<0.01%)
         startMonitoring()
-        
         debugLog("✅ AccessibilityManager инициализирован с реактивным мониторингом")
     }
-    
-    /// Принудительная разовая проверка статуса
+
     func checkStatus() {
+        if usesMock { return }
+
         let currentStatus = AXIsProcessTrusted()
         if isGranted != currentStatus {
             debugLog("🔐 Accessibility Status Changed: \(isGranted) -> \(currentStatus)")
             isGranted = currentStatus
         }
     }
-    
-    /// Запуск постоянного мониторинга через Combine Timer
+
     private func startMonitoring() {
         checkTimer = Timer.publish(every: 1.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.checkStatus()
             }
-        
         debugLog("🔄 Мониторинг прав доступа запущен (проверка каждую секунду)")
     }
-    
-    /// Запрос прав доступа (открытие системного диалога)
+
     func requestPermissions() async {
+        if usesMock || ProcessRuntime.shouldSkipAccessibilityPrompt {
+            debugLog("🔑 Skipping accessibility prompt (test/mock mode)")
+            // Explicit Grant in UI tests can flip to granted without OS dialog.
+            if usesMock {
+                isGranted = true
+            }
+            return
+        }
+
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]
         let accessEnabled = AXIsProcessTrustedWithOptions(options)
-        
+
         debugLog("🔑 Запрос прав доступа: текущий статус = \(accessEnabled)")
-        
+
         if !accessEnabled {
-            // Если диалог не появился (например, права уже отклонены),
-            // показываем инструкцию и открываем настройки
             showGoToSettingsAlert()
         }
     }
-    
+
     private func showGoToSettingsAlert() {
         let alert = NSAlert()
         alert.messageText = "Accessibility Permissions Required"
@@ -65,22 +73,20 @@ class AccessibilityManager: ObservableObject {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Later")
-        
+
         if alert.runModal() == .alertFirstButtonReturn {
             openSystemPreferences()
         }
     }
-    
+
     private func openSystemPreferences() {
-        // Открываем страницу Accessibility в System Settings
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
             debugLog("🔧 Открыты системные настройки (Accessibility)")
         }
     }
-    
+
     deinit {
         checkTimer?.cancel()
-        debugLog("⏹️ AccessibilityManager деинициализирован")
     }
 }
