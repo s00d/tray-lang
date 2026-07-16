@@ -1,0 +1,33 @@
+tray-lang.xcodeproj/project.pbxproj
+  s_aada1954fa2a15::t_813438131083df 415,448
+  s_aada1954fa2a15::t_6cacc7aba39657 401,434
+tray-lang/Info.plist
+  s_aada1954fa2a15::t_c35da98a514923 20,22
+tray-lang/Sources/Managers/HotkeyBlockerManager.swift
+  s_aada1954fa2a15::t_1d68db038b55fb 16-19
+  s_aada1954fa2a15::t_c681c68e9029db 348
+  s_aada1954fa2a15::t_7fedc681f7c3e0 389-390,394-395,397-404,406-407,412-449,463,467-468,470-477,479-480,485-498,533,547,553-567
+  s_aada1954fa2a15::t_0695ec99d7aaef 391,464,528,534,542,548
+  s_aada1954fa2a15::t_95460ea56bf44a 349-350
+  s_aada1954fa2a15::t_eb4f8a0dfe4545 20-21
+  s_aada1954fa2a15::t_c787b300110a83 499
+  s_aada1954fa2a15::t_67c1a7e5dbcbc5 568
+tray-lang/Sources/Core/AppCoordinator.swift
+  s_aada1954fa2a15::t_81392237807ebf 296-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "56dcc1a6cde2cd5ea2f33c895e06c2724fe38dd8",
+  "prompts": {},
+  "sessions": {
+    "s_aada1954fa2a15": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "87e21796-d905-41d8-87ef-9f6bcf300928",
+        "model": "default"
+      },
+      "human_author": "Pavel Kuzmin <Virus191288@gmail.com>"
+    }
+  }
+}
