@@ -5,26 +5,16 @@ import AppKit
 struct DefaultLayoutsView: View {
     @ObservedObject var smartLayoutManager: SmartLayoutManager
     @ObservedObject var keyboardLayoutManager: KeyboardLayoutManager
-    let onDone: () -> Void
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Smart Layout Rules")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Spacer()
-                Button("✕") { onDone() }
-                    .buttonStyle(.plain)
-            }
-            .padding()
-            Divider()
-            
-            // Content
-            List {
-                // --- Секция 1: Правила по умолчанию ---
-                Section {
+        List {
+            Section {
+                if smartLayoutManager.defaultRules.isEmpty {
+                    Text("No default rules yet. Add an application to pin a layout.")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
+                } else {
                     ForEach(smartLayoutManager.defaultRules) { rule in
                         RuleRowView(
                             rule: rule,
@@ -34,51 +24,40 @@ struct DefaultLayoutsView: View {
                             smartLayoutManager.removeRule(for: rule.appBundleID)
                         }
                     }
-                } header: {
-                    HStack {
-                        Text("Default Rules")
-                        Spacer()
-                        Button("Add Application...") { addAppRule() }
-                    }
-                } footer: {
-                    Text("These rules are always applied. They have the highest priority.")
                 }
-                
-                // --- Секция 2: Запомненные раскладки ---
-                Section {
-                    if smartLayoutManager.publishedRememberedLayouts.isEmpty {
-                        Text("No layouts remembered yet. Work in different apps to see them here.")
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding()
-                    } else {
-                        ForEach(smartLayoutManager.publishedRememberedLayouts) { remembered in
-                            RememberedLayoutRowView(remembered: remembered) {
-                                smartLayoutManager.promoteToRule(remembered: remembered)
-                            }
+            } header: {
+                HStack {
+                    Text("Default Rules")
+                    Spacer()
+                    Button("Add Application…") { addAppRule() }
+                }
+            } footer: {
+                Text("These rules are always applied. They have the highest priority.")
+            }
+
+            Section {
+                if smartLayoutManager.publishedRememberedLayouts.isEmpty {
+                    Text("No layouts remembered yet. Work in different apps to see them here.")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
+                } else {
+                    ForEach(smartLayoutManager.publishedRememberedLayouts) { remembered in
+                        RememberedLayoutRowView(remembered: remembered) {
+                            smartLayoutManager.promoteToRule(remembered: remembered)
                         }
                     }
-                } header: {
-                    Text("Remembered Layouts")
-                } footer: {
-                    Text("These layouts were automatically saved. You can 'pin' a remembered layout to turn it into a default rule.")
                 }
+            } header: {
+                Text("Remembered Layouts")
+            } footer: {
+                Text("These layouts were automatically saved. Pin a remembered layout to turn it into a default rule.")
             }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
-            
-            Divider()
-            
-            // Footer
-            HStack {
-                Spacer()
-                Button("Done") { onDone() }
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding()
         }
-        .frame(width: 650, height: 500)
+        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
+
     private func addAppRule() {
         let panel = NSOpenPanel()
         panel.title = "Choose an Application"
@@ -87,7 +66,7 @@ struct DefaultLayoutsView: View {
         panel.canCreateDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType.application]
-        
+
         if panel.runModal() == .OK, let url = panel.url {
             guard let bundle = Bundle(url: url),
                   let bundleID = bundle.bundleIdentifier,
@@ -100,61 +79,62 @@ struct DefaultLayoutsView: View {
                 alert.runModal()
                 return
             }
-            
-            // Добавляем правило с первой доступной раскладкой
+
             let newRule = AppLayoutRule(appBundleID: bundleID, appName: appName, layoutID: defaultLayout.id)
             smartLayoutManager.defaultRules.append(newRule)
         }
     }
 }
 
-// --- Вспомогательные View ---
-
-// View для строки "Правила по умолчанию"
 struct RuleRowView: View {
     let rule: AppLayoutRule
     @ObservedObject var smartLayoutManager: SmartLayoutManager
     @ObservedObject var keyboardLayoutManager: KeyboardLayoutManager
     let onDelete: () -> Void
-    
+
     @State private var selectedLayoutID: String
-    
-    init(rule: AppLayoutRule, smartLayoutManager: SmartLayoutManager, keyboardLayoutManager: KeyboardLayoutManager, onDelete: @escaping () -> Void) {
+
+    init(
+        rule: AppLayoutRule,
+        smartLayoutManager: SmartLayoutManager,
+        keyboardLayoutManager: KeyboardLayoutManager,
+        onDelete: @escaping () -> Void
+    ) {
         self.rule = rule
         self.smartLayoutManager = smartLayoutManager
         self.keyboardLayoutManager = keyboardLayoutManager
         self.onDelete = onDelete
         self._selectedLayoutID = State(initialValue: rule.layoutID)
     }
-    
+
     var body: some View {
         HStack {
             Image(nsImage: rule.appIcon)
                 .resizable()
                 .frame(width: 32, height: 32)
-            
+
             VStack(alignment: .leading) {
                 Text(rule.appName).fontWeight(.semibold)
                 Text(rule.appBundleID).font(.caption).foregroundColor(.secondary)
             }
-            
+
             Spacer()
-            
+
             Picker("Layout", selection: $selectedLayoutID) {
                 ForEach(keyboardLayoutManager.availableLayouts) { layout in
                     Text(layout.localizedName).tag(layout.id)
                 }
             }
-            .frame(width: 150)
-            .onChange(of: selectedLayoutID) { oldValue, newValue in
-                // Обновляем правило в менеджере
+            .labelsHidden()
+            .frame(width: 160)
+            .onChange(of: selectedLayoutID) { _, newValue in
                 if let index = smartLayoutManager.defaultRules.firstIndex(where: { $0.id == rule.id }) {
                     var updatedRule = smartLayoutManager.defaultRules[index]
                     updatedRule.layoutID = newValue
                     smartLayoutManager.defaultRules[index] = updatedRule
                 }
             }
-            
+
             Button(action: onDelete) {
                 Image(systemName: "trash")
             }
@@ -165,17 +145,16 @@ struct RuleRowView: View {
     }
 }
 
-// НОВЫЙ View для строки "Запомненные раскладки"
 struct RememberedLayoutRowView: View {
     let remembered: RememberedLayout
     let onPin: () -> Void
-    
+
     var body: some View {
         HStack {
             Image(nsImage: remembered.appIcon)
                 .resizable()
                 .frame(width: 32, height: 32)
-            
+
             VStack(alignment: .leading) {
                 Text(remembered.appName)
                     .fontWeight(.semibold)
@@ -183,15 +162,16 @@ struct RememberedLayoutRowView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            
+
             Spacer()
-            
+
             Text(remembered.layoutName)
                 .font(.body)
                 .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .background(Color.secondary.opacity(0.1))
-                .cornerRadius(4)
-            
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+
             Button(action: onPin) {
                 Image(systemName: "pin.fill")
                     .foregroundColor(.accentColor)
@@ -202,4 +182,3 @@ struct RememberedLayoutRowView: View {
         .padding(.vertical, 4)
     }
 }
-

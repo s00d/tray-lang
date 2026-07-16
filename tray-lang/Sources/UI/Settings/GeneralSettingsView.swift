@@ -62,25 +62,15 @@ struct GeneralSettingsView: View {
                 .padding(.vertical, 8)
             }
             
-            Section("Main Hotkey") {
-                SettingsRow(icon: "keyboard", iconColor: .blue, title: "Hotkey", subtitle: "For converting selected text") {
-                    Button(coordinator.layoutHotKeyDisplay) {
-                        NotificationCenter.default.post(name: .openHotKeyEditor, object: "layout")
-                    }
-                }
-            }
-            
             Section("Spell Check") {
-                SettingsRow(icon: "text.badge.checkmark", iconColor: .green, title: "Fix Spelling", subtitle: "Enable spell check feature") {
+                SettingsRow(
+                    icon: "text.badge.checkmark",
+                    iconColor: .green,
+                    title: "Fix Spelling",
+                    subtitle: "Enable spell check · \(coordinator.spellCheckHotKeyDisplay)"
+                ) {
                     Toggle("", isOn: $coordinator.isSpellCheckEnabled)
                 }
-                
-                SettingsRow(icon: "keyboard", iconColor: .blue, title: "Spell Check Hotkey", subtitle: "For fixing selected text") {
-                    Button(coordinator.spellCheckHotKeyDisplay) {
-                        NotificationCenter.default.post(name: .openHotKeyEditor, object: "spell")
-                    }
-                }
-                .disabled(!coordinator.isSpellCheckEnabled)
             }
             
             Section("Behavior") {
@@ -93,24 +83,16 @@ struct GeneralSettingsView: View {
                 SettingsRow(icon: "brain.head.profile", iconColor: .cyan, title: "Smart Layout", subtitle: "Remember layout for each application") {
                     Toggle("", isOn: $coordinator.isSmartLayoutEnabled)
                 }
-                
-                SettingsRow(icon: "list.bullet.rectangle.portrait", iconColor: .green, title: "Default Rules", subtitle: "Set layout for specific applications") {
-                    Button("Configure...") {
-                        NotificationCenter.default.post(name: .openDefaultLayoutsEditor, object: nil)
-                    }
-                }
-                .disabled(!coordinator.isSmartLayoutEnabled)
             }
             
             Section("Conversion") {
-                SettingsRow(icon: "textformat.abc", iconColor: .orange, title: "Text Conversion", subtitle: "Enable text conversion feature") {
+                SettingsRow(
+                    icon: "textformat.abc",
+                    iconColor: .orange,
+                    title: "Text Conversion",
+                    subtitle: "Enable conversion · \(coordinator.layoutHotKeyDisplay)"
+                ) {
                     Toggle("", isOn: $coordinator.isTextConversionEnabled)
-                }
-                
-                SettingsRow(icon: "pencil", iconColor: .orange, title: "Symbols & Languages", subtitle: "Edit symbol replacement rules") {
-                    Button("Edit...") {
-                        NotificationCenter.default.post(name: .openSymbolsEditor, object: nil)
-                    }
                 }
             }
             
@@ -127,13 +109,6 @@ struct GeneralSettingsView: View {
             Section("Protection Settings") {
                 SettingsRow(icon: "timer", iconColor: .gray, title: "Hold Delay", subtitle: "Time to hold keys before triggering") {
                     Stepper("\(coordinator.blockerDelay) sec", value: $coordinator.blockerDelay, in: 1...5)
-                }
-                .disabled(!isProtectionSettingsVisible)
-                
-                SettingsRow(icon: "shield.slash", iconColor: .indigo, title: "Exclusions", subtitle: "Apps where protection won't work") {
-                    Button("Configure...") {
-                        NotificationCenter.default.post(name: .openExclusionsView, object: nil)
-                    }
                 }
                 .disabled(!isProtectionSettingsVisible)
             }
