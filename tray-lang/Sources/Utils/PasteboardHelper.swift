@@ -16,7 +16,13 @@ enum PasteboardHelper {
             if pasteboard.changeCount != originalCount, let string = pasteboard.string(forType: .string) {
                 return string
             }
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(delay))
+            if Thread.isMainThread {
+                // Keep the UI (HUD) responsive while waiting.
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(delay))
+            } else {
+                // A background run loop has no sources and returns at once; sleep instead of spinning.
+                Thread.sleep(forTimeInterval: delay)
+            }
             delay = min(delay * 2, 0.008)
         } while Date() < deadline
         return nil

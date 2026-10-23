@@ -136,10 +136,17 @@ struct SupportingBehaviourTests {
     @Test(.enabled(if: Dictionaries.russianAndEnglish, "needs the Russian and English system dictionaries"))
     func spellingFixesRussianAndEnglish() {
         let checker = SpellCheckManager()
-        #expect(checker.fixText("привт как дила") == "привет как дела")
-        #expect(checker.fixText("I recieve the wrold") == "I receive the world")
-        #expect(checker.fixText("Привт") == "Привет", "capital kept")
+        let validator = SpellCheckWordValidator()
+        // Exact suggestions depend on the dictionaries installed; check the contract instead.
+        for typo in ["привт", "дила", "recieve", "wrold"] {
+            let fixed = checker.fixText(typo)
+            #expect(fixed != typo, "\(typo) was not corrected")
+            #expect(validator.isWord(fixed), "\(typo) → \(fixed) is not a dictionary word")
+        }
+        #expect(checker.fixText("I recieve it") == "I receive it")
+        #expect(checker.fixText("Привт").first?.isUppercase == true, "capital kept")
         #expect(checker.fixText("all good here") == "all good here")
+        #expect(checker.fixText("привет как дела") == "привет как дела")
         #expect(checker.fixText("") == "")
     }
 
