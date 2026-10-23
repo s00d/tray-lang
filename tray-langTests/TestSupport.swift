@@ -1,14 +1,6 @@
 import AppKit
 @testable import tray_lang
 
-/// Spell-check tests need the system dictionaries; CI images may lack Russian.
-enum Dictionaries {
-    static let russianAndEnglish: Bool = {
-        let available = NSSpellChecker.shared.availableLanguages
-        return available.contains("ru") && available.contains("en")
-    }()
-}
-
 enum Layouts {
     static let abc = SystemKeyboardLayouts.abcLayoutID
     static let russianMac = "com.apple.keylayout.Russian"

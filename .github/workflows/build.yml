@@ -1,8 +1,9 @@
 name: Release
 
-# Run from the Actions tab once MARKETING_VERSION is bumped and pushed.
-# macos-26 runners ship the newest Xcode as default (actions/runner-images), so no setup action is needed.
-# Tests → universal Developer ID build → notarized + stapled app and DMG → GitHub release vX.Y.
+# Run after `make test` passes locally and MARKETING_VERSION is bumped and pushed.
+# The app's tests need a real session (layouts, dictionaries, Accessibility, pasteboard), which hosted
+# runners don't have, so CI only builds: universal Developer ID app → notarized + stapled app and DMG
+# → GitHub release vX.Y. macos-26 runners ship the newest Xcode as default, no setup action needed.
 on:
   workflow_dispatch:
     inputs:
@@ -19,29 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Xcode version
-        run: xcodebuild -version
-
-      - name: Unit tests
-        run: make test
-
-      - name: Upload test log
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results
-          path: |
-            build/test.log
-            ~/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult
-
   release:
-    needs: test
     runs-on: macos-26
     timeout-minutes: 60
     env:

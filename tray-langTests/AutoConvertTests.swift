@@ -5,7 +5,6 @@ import Testing
 /// Auto-convert while typing: decisions are made by a pure engine fed with key events,
 /// so every case runs without touching the real keyboard.
 @MainActor
-@Suite(.enabled(if: Dictionaries.russianAndEnglish, "needs the Russian and English system dictionaries"))
 struct AutoConvertTests {
     /// Real dictionaries for the two languages involved.
     private let validator = SpellCheckWordValidator()

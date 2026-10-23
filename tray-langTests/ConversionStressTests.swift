@@ -133,8 +133,7 @@ struct SupportingBehaviourTests {
         #expect(SpellCheckManager.language(for: "привт", available: ["en"]) == nil)
     }
 
-    @Test(.enabled(if: Dictionaries.russianAndEnglish, "needs the Russian and English system dictionaries"))
-    func spellingFixesRussianAndEnglish() {
+    @Test func spellingFixesRussianAndEnglish() {
         let checker = SpellCheckManager()
         let validator = SpellCheckWordValidator()
         // Exact suggestions depend on the dictionaries installed; check the contract instead.

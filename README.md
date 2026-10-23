@@ -70,8 +70,9 @@ builds a signed universal app, replaces the copy in /Applications and restarts i
 
 ## Releasing
 
-1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` (app target) and push.
-2. Run the **Release** workflow (`gh workflow run build.yml --ref main`). It runs the tests, builds a universal Developer ID app, notarizes and staples the app and the DMG, and publishes release `vX.Y` with generated notes and a SHA-256 checksum. It refuses to run if the tag already exists.
+1. Run `make test` on your Mac (the tests need a real session: layouts, dictionaries, pasteboard).
+2. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` (app target) and push.
+3. Run the **Release** workflow (`gh workflow run build.yml --ref main`). It builds a universal Developer ID app, notarizes and staples the app and the DMG, and publishes release `vX.Y` with generated notes and a SHA-256 checksum. It refuses to run if the tag already exists.
 
 ## Troubleshooting
 
