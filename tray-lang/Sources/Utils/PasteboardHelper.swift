@@ -1,6 +1,14 @@
 import Foundation
 import AppKit
 
+/// What `waitForString` reads; NSPasteboard provides it, tests use a fake.
+protocol PasteboardReading: AnyObject {
+    var changeCount: Int { get }
+    func string(forType type: NSPasteboard.PasteboardType) -> String?
+}
+
+extension NSPasteboard: PasteboardReading {}
+
 enum PasteboardHelper {
     /// Waits until the pasteboard changed *and* holds a string.
     /// `clearContents()` bumps `changeCount` before the new data is written, so the
@@ -8,7 +16,7 @@ enum PasteboardHelper {
     static func waitForString(
         changedFrom originalCount: Int,
         timeout: TimeInterval = ClipboardConversionTiming.pasteboardChangeTimeout,
-        pasteboard: NSPasteboard = .general
+        pasteboard: PasteboardReading = NSPasteboard.general
     ) -> String? {
         let deadline = Date().addingTimeInterval(timeout)
         var delay: TimeInterval = 0.001

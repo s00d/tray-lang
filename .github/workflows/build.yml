@@ -1,6 +1,7 @@
 name: Release
 
 # Run from the Actions tab once MARKETING_VERSION is bumped and pushed.
+# macos-26 runners ship the newest Xcode as default (actions/runner-images), so no setup action is needed.
 # Tests → universal Developer ID build → notarized + stapled app and DMG → GitHub release vX.Y.
 on:
   workflow_dispatch:
@@ -19,14 +20,13 @@ concurrency:
 
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Xcode version
+        run: xcodebuild -version
 
       - name: Unit tests
         run: make test
@@ -42,7 +42,7 @@ jobs:
 
   release:
     needs: test
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -52,9 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Xcode version
+        run: xcodebuild -version
 
       - name: Read version
         run: |
