@@ -4,7 +4,6 @@
 //
 
 import AppKit
-import Combine
 
 @main
 final class TrayLangApplication {
@@ -36,45 +35,36 @@ enum SingleInstanceGuard {
 
         guard let existing = others.first else { return false }
 
-        existing.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+        existing.activate(from: .current, options: [.activateAllWindows])
         return true
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var coordinator: AppCoordinator!
-    private var cancellables = Set<AnyCancellable>()
+    private var coordinator: AppCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        coordinator = AppCoordinator()
-        coordinator.windowManager.setCoordinator(coordinator)
+        // Unit tests are hosted by the app: they build their own coordinators, so no tray, windows or taps here.
+        guard !ProcessRuntime.isRunningUnderTests else { return }
+
+        let coordinator = AppCoordinator()
+        self.coordinator = coordinator
         coordinator.windowManager.setupStatusBar()
-
-        coordinator.keyboardLayoutManager.$currentLayout
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] newLayout in
-                self?.coordinator.windowManager.updateStatusItemTitle(shortName: newLayout?.shortName ?? "")
-            }
-            .store(in: &cancellables)
-
         coordinator.start()
 
         if ProcessInfo.processInfo.arguments.contains("-openSettings") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.coordinator.showMainWindow()
-            }
+            coordinator.windowManager.showSettings()
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        coordinator?.windowManager.showSettings()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         coordinator?.windowManager.teardownStatusBar()
         coordinator?.stop()
-    }
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        coordinator?.windowManager.teardownStatusBar()
-        coordinator?.stop()
-        return .terminateNow
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -1,234 +1,194 @@
-//
-//  SmartLayoutManager.swift
-//  tray-lang
-//
-//  Created by s00d on 14.11.2025.
-//
-
 import Foundation
 import AppKit
 
-// Структура для удобного отображения в SwiftUI
 struct RememberedLayout: Identifiable, Hashable {
-    var id: String { appBundleID } // Используем bundleID как уникальный идентификатор
+    var id: String { appBundleID }
     var appBundleID: String
     var appName: String
     var layoutID: String
     var layoutName: String
-    
+    var isInstalled = true
+
     var appIcon: NSImage {
-        return IconCache.shared.icon(for: appBundleID)
+        IconCache.shared.icon(for: appBundleID)
     }
 }
 
-class SmartLayoutManager: ObservableObject {
-    // @Published позволит UI автоматически обновляться при изменении этого значения
+/// Gives each app back its keyboard layout: a fixed rule if there is one, else the layout it was last left in.
+final class SmartLayoutManager: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
-            // Сохраняем любое изменение в UserDefaults для персистентности
-            UserDefaults.standard.set(isEnabled, forKey: DefaultsKeys.smartLayoutEnabled)
-            // Включаем или выключаем мониторинг в зависимости от состояния
-            if isEnabled {
-                startMonitoring()
-            } else {
-                stopMonitoring()
-            }
+            guard isEnabled != oldValue else { return }
+            AppDefaults.store.set(isEnabled, forKey: DefaultsKeys.smartLayoutEnabled)
+            isEnabled ? startMonitoring() : stopMonitoring()
         }
     }
-    
-    // Новое свойство для правил
+
     @Published var defaultRules: [AppLayoutRule] = [] {
         didSet {
-            saveRules()
-            updatePublishedRememberedLayouts() // Обновляем UI при изменении правил
+            if let data = try? JSONEncoder().encode(defaultRules) {
+                AppDefaults.store.set(data, forKey: DefaultsKeys.smartLayoutRules)
+            }
+            updatePublishedRememberedLayouts()
         }
     }
-    
-    // Новое @Published свойство для UI
-    @Published var publishedRememberedLayouts: [RememberedLayout] = []
-    
+
+    @Published private(set) var publishedRememberedLayouts: [RememberedLayout] = []
+
     private let keyboardLayoutManager: KeyboardLayoutManager
-    private var rememberedLayouts: [String: String] = [:] // Переименовали для ясности
-    
-    // Throttling для сохранения
-    private var needsSave = false
-    
-    // Ключи для UserDefaults
-    private let rulesUserDefaultsKey = DefaultsKeys.smartLayoutRules
-    private let rememberedUserDefaultsKey = DefaultsKeys.rememberedAppLayouts
-    
+    private var rememberedLayouts: [String: String] = [:]
+    /// bundle ID → display name; filled from activation notifications, LaunchServices only as a fallback.
+    private var appNames: [String: String] = [:]
+    /// bundle ID → whether the app is still installed; asked once per app.
+    private var installed: [String: Bool] = [:]
+    private var observers: [NSObjectProtocol] = []
+    private var saveTask: DispatchWorkItem?
+
     init(keyboardLayoutManager: KeyboardLayoutManager) {
         self.keyboardLayoutManager = keyboardLayoutManager
-        
-        // Читаем сохраненное значение. Если его нет, по умолчанию будет `false`
-        self.isEnabled = UserDefaults.standard.bool(forKey: DefaultsKeys.smartLayoutEnabled)
-        
-        loadRules()
-        loadRememberedLayouts() // Этот метод теперь будет вызывать обновление UI
-        
-        // Запускаем мониторинг только если функция была включена ранее
+        isEnabled = AppDefaults.store.bool(forKey: DefaultsKeys.smartLayoutEnabled)
+        if let data = AppDefaults.store.data(forKey: DefaultsKeys.smartLayoutRules),
+           let rules = try? JSONDecoder().decode([AppLayoutRule].self, from: data) {
+            defaultRules = rules
+        }
+        rememberedLayouts = AppDefaults.store.dictionary(forKey: DefaultsKeys.rememberedAppLayouts) as? [String: String] ?? [:]
+        updatePublishedRememberedLayouts()
         if isEnabled {
             startMonitoring()
         }
     }
-    
+
     deinit {
         stopMonitoring()
+        saveTask?.perform()
     }
-    
+
+    // MARK: - Monitoring
+
     private func startMonitoring() {
-        print("🧠 Smart Layout Manager: Started monitoring.")
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appDidDeactivate), name: NSWorkspace.didDeactivateApplicationNotification, object: nil)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appDidActivate), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        guard observers.isEmpty else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        observers = [
+            center.addObserver(forName: NSWorkspace.didDeactivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                self?.appDeactivated(note)
+            },
+            center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                self?.appActivated(note)
+            },
+        ]
     }
-    
+
     private func stopMonitoring() {
-        print("🧠 Smart Layout Manager: Stopped monitoring.")
-        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        observers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
+        observers.removeAll()
     }
-    
-    @objc private func appDidDeactivate(notification: Notification) {
-        // Эта функция срабатывает, когда приложение перестает быть активным
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+
+    private static func app(in note: Notification) -> NSRunningApplication? {
+        note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+    }
+
+    private func appDeactivated(_ note: Notification) {
+        guard let app = Self.app(in: note),
               let bundleID = app.bundleIdentifier,
-              let currentLayout = keyboardLayoutManager.currentLayout else { return }
-        
-        // Запоминаем раскладку, только если нет правила
-        if !defaultRules.contains(where: { $0.appBundleID == bundleID }) {
-            if rememberedLayouts[bundleID] != currentLayout.id {
-                rememberedLayouts[bundleID] = currentLayout.id
-                needsSave = true
-                
-                // Сохраняем с задержкой (debounce), чтобы не писать на диск при быстром Alt+Tab
-                scheduleSave()
-                
-                updatePublishedRememberedLayouts() // Обновляем UI сразу
-                print("🧠 Saved layout '\(currentLayout.localizedName)' for \(bundleID)")
-            }
+              bundleID != Bundle.main.bundleIdentifier,
+              !defaultRules.contains(where: { $0.appBundleID == bundleID }),
+              let layoutID = keyboardLayoutManager.currentLayoutID,
+              rememberedLayouts[bundleID] != layoutID else { return }
+        if let name = app.localizedName {
+            appNames[bundleID] = name
         }
-    }
-    
-    @objc private func performSave() {
-        if needsSave {
-            UserDefaults.standard.set(rememberedLayouts, forKey: rememberedUserDefaultsKey)
-            needsSave = false
-            print("🧠 Layouts saved to UserDefaults")
-        }
-    }
-    
-    @objc private func appDidActivate(notification: Notification) {
-        // Эта функция срабатывает, когда приложение становится активным
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let bundleID = app.bundleIdentifier else { return }
-        
-        // Новая логика приоритетов
-        
-        // ПРИОРИТЕТ 1: Проверяем правила по умолчанию
-        if let rule = defaultRules.first(where: { $0.appBundleID == bundleID }) {
-            if rule.layoutID != keyboardLayoutManager.currentLayout?.id {
-                keyboardLayoutManager.switchToLayout(id: rule.layoutID)
-                print("🧠 Applied default rule for \(bundleID): switch to \(rule.layoutID)")
-            }
-            return // Правило применено, выходим
-        }
-        
-        // ПРИОРИТЕТ 2: Проверяем запомненные раскладки
-        if let rememberedLayoutID = rememberedLayouts[bundleID] {
-            if rememberedLayoutID != keyboardLayoutManager.currentLayout?.id {
-                keyboardLayoutManager.switchToLayout(id: rememberedLayoutID)
-                print("🧠 Switched to remembered layout for \(bundleID): \(rememberedLayoutID)")
-            }
-        }
-    }
-    
-    // --- Управление правилами ---
-    func addRule(for app: NSRunningApplication, layoutID: String) {
-        guard let bundleID = app.bundleIdentifier, let appName = app.localizedName else { return }
-        
-        // Удаляем старое правило, если оно было
-        removeRule(for: bundleID)
-        
-        let newRule = AppLayoutRule(appBundleID: bundleID, appName: appName, layoutID: layoutID)
-        defaultRules.append(newRule)
-    }
-    
-    func removeRule(for bundleID: String) {
-        defaultRules.removeAll { $0.appBundleID == bundleID }
-        updatePublishedRememberedLayouts() // Обновляем UI, так как приложение может появиться в запомненных
-    }
-    
-    // НОВЫЙ МЕТОД для "закрепления"
-    func promoteToRule(remembered: RememberedLayout) {
-        // Создаем новое правило из запомненного
-        let newRule = AppLayoutRule(appBundleID: remembered.appBundleID, appName: remembered.appName, layoutID: remembered.layoutID)
-        
-        // Удаляем старое правило для этого приложения, если оно было
-        defaultRules.removeAll { $0.appBundleID == newRule.appBundleID }
-        // Добавляем новое
-        defaultRules.append(newRule)
-        
-        // Удаляем из запомненных, так как теперь есть постоянное правило
-        rememberedLayouts.removeValue(forKey: remembered.appBundleID)
-        saveRememberedLayouts()
+        rememberedLayouts[bundleID] = layoutID
+        scheduleSave()
         updatePublishedRememberedLayouts()
     }
-    
-    // --- Persistence ---
-    private func saveRules() {
-        if let data = try? JSONEncoder().encode(defaultRules) {
-            UserDefaults.standard.set(data, forKey: rulesUserDefaultsKey)
+
+    private func appActivated(_ note: Notification) {
+        guard let bundleID = Self.app(in: note)?.bundleIdentifier else { return }
+        let target = defaultRules.first(where: { $0.appBundleID == bundleID })?.layoutID ?? rememberedLayouts[bundleID]
+        if let target, target != keyboardLayoutManager.currentLayoutID {
+            keyboardLayoutManager.switchToLayout(id: target)
         }
     }
-    
-    private func loadRules() {
-        if let data = UserDefaults.standard.data(forKey: rulesUserDefaultsKey),
-           let saved = try? JSONDecoder().decode([AppLayoutRule].self, from: data) {
-            defaultRules = saved
-        }
+
+    // MARK: - Rules
+
+    func addRule(for app: NSRunningApplication, layoutID: String) {
+        guard let bundleID = app.bundleIdentifier, let appName = app.localizedName else { return }
+        setRule(bundleID: bundleID, appName: appName, layoutID: layoutID)
     }
-    
-    private var saveTask: DispatchWorkItem?
-    
+
+    /// One rule per app; replaces an existing one in a single assignment (one save, one UI update).
+    func setRule(bundleID: String, appName: String, layoutID: String) {
+        defaultRules = defaultRules.filter { $0.appBundleID != bundleID }
+            + [AppLayoutRule(appBundleID: bundleID, appName: appName, layoutID: layoutID)]
+    }
+
+    func removeRule(for bundleID: String) {
+        defaultRules.removeAll { $0.appBundleID == bundleID }
+    }
+
+    func promoteToRule(remembered: RememberedLayout) {
+        rememberedLayouts.removeValue(forKey: remembered.appBundleID)
+        scheduleSave()
+        setRule(bundleID: remembered.appBundleID, appName: remembered.appName, layoutID: remembered.layoutID)
+    }
+
+    /// Drops remembered layouts of apps that are no longer installed.
+    func forgetUninstalledApps() {
+        let missing = publishedRememberedLayouts.filter { !$0.isInstalled }.map(\.appBundleID)
+        guard !missing.isEmpty else { return }
+        missing.forEach { rememberedLayouts.removeValue(forKey: $0) }
+        scheduleSave()
+        updatePublishedRememberedLayouts()
+    }
+
+    func forget(bundleID: String) {
+        rememberedLayouts.removeValue(forKey: bundleID)
+        scheduleSave()
+        updatePublishedRememberedLayouts()
+    }
+
+    // MARK: - Persistence
+
+    /// Quick app switching changes the map often; write it at most every half second.
     private func scheduleSave() {
-        // Отменяем предыдущую задачу сохранения
         saveTask?.cancel()
-        
-        // Создаем новую задачу с задержкой
         let task = DispatchWorkItem { [weak self] in
-            self?.performSave()
+            guard let self else { return }
+            AppDefaults.store.set(self.rememberedLayouts, forKey: DefaultsKeys.rememberedAppLayouts)
         }
         saveTask = task
-        
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: task)
     }
-    
-    private func saveRememberedLayouts() {
-        // Используем throttling вместо немедленного сохранения
-        needsSave = true
-        scheduleSave()
+
+    private func isInstalled(_ bundleID: String) -> Bool {
+        if let cached = installed[bundleID] { return cached }
+        let value = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
+        installed[bundleID] = value
+        return value
     }
-    
-    private func loadRememberedLayouts() {
-        rememberedLayouts = UserDefaults.standard.dictionary(forKey: rememberedUserDefaultsKey) as? [String: String] ?? [:]
-        updatePublishedRememberedLayouts() // Обновляем UI при загрузке
+
+    private func name(for bundleID: String) -> String {
+        if let cached = appNames[bundleID] { return cached }
+        let name = NSWorkspace.shared.applicationName(for: bundleID)
+        appNames[bundleID] = name
+        return name
     }
-    
-    // НОВЫЙ МЕТОД для конвертации словаря в массив для UI
+
     private func updatePublishedRememberedLayouts() {
-        var newPublished: [RememberedLayout] = []
-        for (bundleID, layoutID) in rememberedLayouts {
-            // Игнорируем, если для этого приложения уже есть правило по умолчанию
-            if defaultRules.contains(where: { $0.appBundleID == bundleID }) {
-                continue
+        let ruled = Set(defaultRules.map(\.appBundleID))
+        let layoutNames = Dictionary(keyboardLayoutManager.availableLayouts.map { ($0.id, $0.localizedName) }, uniquingKeysWith: { first, _ in first })
+        publishedRememberedLayouts = rememberedLayouts
+            .filter { !ruled.contains($0.key) }
+            .map { bundleID, layoutID in
+                RememberedLayout(
+                    appBundleID: bundleID,
+                    appName: name(for: bundleID),
+                    layoutID: layoutID,
+                    layoutName: layoutNames[layoutID] ?? SystemKeyboardLayouts.localizedName(ofLayoutID: layoutID) ?? layoutID,
+                    isInstalled: isInstalled(bundleID)
+                )
             }
-            
-            let appName = NSWorkspace.shared.applicationName(for: bundleID)
-            let layoutName = keyboardLayoutManager.availableLayouts.first { $0.id == layoutID }?.localizedName ?? "Unknown"
-            
-            newPublished.append(RememberedLayout(appBundleID: bundleID, appName: appName, layoutID: layoutID, layoutName: layoutName))
-        }
-        
-        // Сортируем для стабильного отображения
-        self.publishedRememberedLayouts = newPublished.sorted { $0.appName < $1.appName }
+            .sorted { $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending }
     }
 }

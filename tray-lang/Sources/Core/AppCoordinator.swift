@@ -3,377 +3,294 @@ import SwiftUI
 import Combine
 
 @MainActor
-class AppCoordinator: ObservableObject {
-    // --- UI State Properties ---
+final class AppCoordinator: ObservableObject {
+    // MARK: - UI state
     @Published var isAutoLaunchEnabled: Bool
+    @Published private(set) var autoLaunchError: String?
     @Published var isTextConversionEnabled: Bool
     @Published var isSpellCheckEnabled: Bool
+    @Published var isAutoConvertEnabled: Bool
+    @Published var isAutoConvertSoundEnabled: Bool
+    @Published var isAutoConvertSkippingCodeApps: Bool
     @Published var isCmdQBlockerEnabled: Bool
     @Published var isCmdWBlockerEnabled: Bool
-    @Published var isAccessibilityGranted: Bool
-    @Published var isSecureInputActive: Bool = false
-    @Published private(set) var secureInputHolderName: String?
-    @Published private(set) var isSecureInputStale: Bool = false
-    @Published var isSmartLayoutEnabled: Bool
     @Published var blockerDelay: Int
-    @Published private(set) var layoutHotKeyDisplay: String = ""
-    @Published private(set) var spellCheckHotKeyDisplay: String = ""
+    @Published private(set) var isAccessibilityGranted = false
+    @Published private(set) var isSecureInputActive = false
+    @Published private(set) var secureInputHolderName: String?
+    @Published private(set) var isSecureInputStale = false
+    @Published private(set) var layoutHotKeyDisplay = ""
+    @Published private(set) var spellCheckHotKeyDisplay = ""
 
-    // --- Core Managers ---
+    // MARK: - Managers
     let keyboardLayoutManager: KeyboardLayoutManager
     let hotKeyManager: HotKeyManager
     let textTransformer: TextTransformer
     let spellCheckManager: SpellCheckManager
     let accessibilityManager: AccessibilityManager
     let autoLaunchManager: AutoLaunchManager
-    let textProcessingManager: TextProcessingManager
-    var smartLayoutManager: SmartLayoutManager
     let notificationManager: NotificationManager
-    // ИСПРАВЛЕНО: Убираем lazy для предотвращения проблем с инициализацией
+    let textProcessingManager: TextProcessingManager
+    let smartLayoutManager: SmartLayoutManager
     let exclusionManager: ExclusionManager
-    var hotkeyBlockerManager: HotkeyBlockerManager // var для binding в UI
+    let hotkeyBlockerManager: HotkeyBlockerManager
+    let autoConvertManager: AutoConvertManager
     let windowManager: WindowManager
-    
-    // УЛУЧШЕНО: stateUpdateTimer удален, используется только Combine
+
     private var cancellables = Set<AnyCancellable>()
-    
-    init() {
-        // --- Инициализация менеджеров в правильном порядке ---
-        self.keyboardLayoutManager = KeyboardLayoutManager()
-        self.hotKeyManager = HotKeyManager()
-        self.textTransformer = TextTransformer()
-        self.spellCheckManager = SpellCheckManager()
-        self.accessibilityManager = AccessibilityManager()
-        self.autoLaunchManager = AutoLaunchManager()
-        self.notificationManager = NotificationManager()
-        self.textProcessingManager = TextProcessingManager(
+
+    init(selectionDriver: SelectionDriver = SystemSelectionDriver()) {
+        let defaults = AppDefaults.store
+        keyboardLayoutManager = KeyboardLayoutManager()
+        hotKeyManager = HotKeyManager()
+        textTransformer = TextTransformer()
+        spellCheckManager = SpellCheckManager()
+        accessibilityManager = AccessibilityManager()
+        autoLaunchManager = AutoLaunchManager()
+        notificationManager = NotificationManager()
+        textProcessingManager = TextProcessingManager(
             textTransformer: textTransformer,
             keyboardLayoutManager: keyboardLayoutManager,
             spellCheckManager: spellCheckManager,
-            notificationManager: notificationManager
-        )
-        self.smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
-        
-        // ИСПРАВЛЕНО: Инициализируем exclusionManager и hotkeyBlockerManager явно
-        self.exclusionManager = ExclusionManager()
-        
-        // --- Первоначальная загрузка состояния из UserDefaults ---
-        let savedAutoLaunch = autoLaunchManager.isAutoLaunchEnabled()
-        let savedTextConversion = UserDefaults.standard.bool(forKey: DefaultsKeys.hotKeyMonitoringEnabled)
-        let savedSpellCheckEnabled = UserDefaults.standard.bool(forKey: DefaultsKeys.spellCheckEnabled)
-        let savedCmdQBlocker = UserDefaults.standard.bool(forKey: DefaultsKeys.qblockerEnabled)
-        let savedCmdWBlocker = UserDefaults.standard.bool(forKey: DefaultsKeys.wblockerEnabled)
-        
-        self.isAutoLaunchEnabled = savedAutoLaunch
-        self.isTextConversionEnabled = savedTextConversion
-        self.isSpellCheckEnabled = savedSpellCheckEnabled
-        self.isCmdQBlockerEnabled = savedCmdQBlocker
-        self.isCmdWBlockerEnabled = savedCmdWBlocker
-        self.isAccessibilityGranted = false // Начинаем с false, таймер исправит
-        self.isSmartLayoutEnabled = false
-        self.blockerDelay = 1
-        
-        // ИСПРАВЛЕНО: Создаем hotkeyBlockerManager с явной передачей настроек
-        self.hotkeyBlockerManager = HotkeyBlockerManager(
             notificationManager: notificationManager,
-            exclusionManager: exclusionManager
+            driver: selectionDriver
         )
-        
-        self.windowManager = WindowManager()
-        
-        // Явно устанавливаем начальные значения после инициализации всех свойств
-        self.hotkeyBlockerManager.isCmdQEnabled = savedCmdQBlocker
-        self.hotkeyBlockerManager.isCmdWEnabled = savedCmdWBlocker
-        self.isSmartLayoutEnabled = smartLayoutManager.isEnabled
-        self.blockerDelay = hotkeyBlockerManager.delay
-        self.layoutHotKeyDisplay = hotKeyManager.layoutHotKey.displayString
-        self.spellCheckHotKeyDisplay = hotKeyManager.spellCheckHotKey.displayString
+        smartLayoutManager = SmartLayoutManager(keyboardLayoutManager: keyboardLayoutManager)
+        exclusionManager = ExclusionManager()
+        hotkeyBlockerManager = HotkeyBlockerManager(notificationManager: notificationManager, exclusionManager: exclusionManager)
+        autoConvertManager = AutoConvertManager(transformer: textTransformer, keyboardLayoutManager: keyboardLayoutManager)
+        windowManager = WindowManager()
 
-        // Устанавливаем связи
+        // Off until the user opts in; sound and skipping code apps default to on.
+        isAutoConvertEnabled = defaults.bool(forKey: DefaultsKeys.autoConvertEnabled)
+        isAutoConvertSoundEnabled = defaults.object(forKey: DefaultsKeys.autoConvertSound) as? Bool ?? true
+        isAutoConvertSkippingCodeApps = defaults.object(forKey: DefaultsKeys.autoConvertSkipCodeApps) as? Bool ?? true
+        isAutoLaunchEnabled = autoLaunchManager.isEnabled
+        // First launch: conversion on. Afterwards the saved choice wins.
+        isTextConversionEnabled = defaults.object(forKey: DefaultsKeys.hotKeyMonitoringEnabled) as? Bool ?? true
+        isSpellCheckEnabled = defaults.bool(forKey: DefaultsKeys.spellCheckEnabled)
+        isCmdQBlockerEnabled = defaults.bool(forKey: DefaultsKeys.qblockerEnabled)
+        isCmdWBlockerEnabled = defaults.bool(forKey: DefaultsKeys.wblockerEnabled)
+        blockerDelay = hotkeyBlockerManager.delay
+        hotkeyBlockerManager.isCmdQEnabled = isCmdQBlockerEnabled
+        hotkeyBlockerManager.isCmdWEnabled = isCmdWBlockerEnabled
+        layoutHotKeyDisplay = hotKeyManager.layoutHotKey.displayString
+        spellCheckHotKeyDisplay = hotKeyManager.spellCheckHotKey.displayString
+
+        autoConvertManager.playsSound = isAutoConvertSoundEnabled
+        autoConvertManager.skipsTerminalsAndCodeEditors = isAutoConvertSkippingCodeApps
+        autoConvertManager.isEnabled = isAutoConvertEnabled
+
         windowManager.setCoordinator(self)
-        
         setupBindings()
     }
-    
+
     private func setupBindings() {
-        // НОВАЯ ЛОГИКА: Связываем монитор прав доступа с сервисами
-        // Это ключевое улучшение - автоматический перезапуск при получении прав!
         accessibilityManager.$isGranted
-            .receive(on: DispatchQueue.main)
+            .removeDuplicates()
             .sink { [weak self] granted in
                 guard let self else { return }
                 self.isAccessibilityGranted = granted
-                
-                if granted {
-                    debugLog("✅ Права доступа получены! Перезапускаем сервисы...")
-                    
-                    if self.isTextConversionEnabled && !self.hotKeyManager.isEnabled {
-                        self.hotKeyManager.startMonitoring()
-                    }
-                    
-                    if (self.isCmdQBlockerEnabled || self.isCmdWBlockerEnabled) && !self.hotkeyBlockerManager.isMonitoring {
-                        self.hotkeyBlockerManager.isCmdQEnabled = self.isCmdQBlockerEnabled
-                        self.hotkeyBlockerManager.isCmdWEnabled = self.isCmdWBlockerEnabled
-                        self.hotkeyBlockerManager.updateMonitoringState()
-                    }
-                } else {
-                    debugLog("⛔️ Права доступа отозваны! Останавливаем сервисы...")
-                    if self.hotKeyManager.isEnabled {
-                        self.hotKeyManager.stopMonitoring()
-                    }
-                    if self.hotkeyBlockerManager.isMonitoring {
-                        self.hotkeyBlockerManager.stop()
-                    }
-                }
-                
-                self.updateStatusBarIcon()
-            }
-            .store(in: &cancellables)
-        
-        // Эта логика связывает действия пользователя в UI с поведением менеджеров
-        $isTextConversionEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)  // ИСПРАВЛЕНО: Обязательно в main thread!
-            .sink { [weak self] enabled in
-                guard let self = self else { return }
-                self.hotKeyManager.saveEnabledState(enabled)
-                
-                // Запускаем/останавливаем только если есть права
-                if self.isAccessibilityGranted {
-                    if enabled {
-                        self.hotKeyManager.startMonitoring()
-                    } else {
-                        self.hotKeyManager.stopMonitoring()
-                    }
-                }
-                
-                self.updateStatusBarIcon()
-            }
-            .store(in: &cancellables)
-        
-        // НОВОЕ: Подписка на изменения Secure Input
-        hotKeyManager.$isSecureInputActive
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isActive in
-                self?.isSecureInputActive = isActive
-                self?.updateStatusBarIcon()
+                self.applyServiceState()
             }
             .store(in: &cancellables)
 
-        hotKeyManager.$secureInputHolderName
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] name in
-                self?.secureInputHolderName = name
+        $isTextConversionEnabled.dropFirst().removeDuplicates()
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                AppDefaults.store.set(enabled, forKey: DefaultsKeys.hotKeyMonitoringEnabled)
+                self.applyServiceState(conversionEnabled: enabled)
             }
             .store(in: &cancellables)
 
-        hotKeyManager.$isSecureInputStale
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isStale in
-                self?.isSecureInputStale = isStale
+        $isSpellCheckEnabled.dropFirst().removeDuplicates()
+            .sink { AppDefaults.store.set($0, forKey: DefaultsKeys.spellCheckEnabled) }
+            .store(in: &cancellables)
+
+        $isAutoConvertEnabled.dropFirst().removeDuplicates()
+            .sink { [weak self] enabled in
+                AppDefaults.store.set(enabled, forKey: DefaultsKeys.autoConvertEnabled)
+                self?.autoConvertManager.isEnabled = enabled
             }
             .store(in: &cancellables)
-            
-        $isAutoLaunchEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)
+        $isAutoConvertSoundEnabled.dropFirst().removeDuplicates()
             .sink { [weak self] enabled in
-                enabled ? self?.autoLaunchManager.enableAutoLaunch() : self?.autoLaunchManager.disableAutoLaunch()
+                AppDefaults.store.set(enabled, forKey: DefaultsKeys.autoConvertSound)
+                self?.autoConvertManager.playsSound = enabled
+            }
+            .store(in: &cancellables)
+        $isAutoConvertSkippingCodeApps.dropFirst().removeDuplicates()
+            .sink { [weak self] enabled in
+                AppDefaults.store.set(enabled, forKey: DefaultsKeys.autoConvertSkipCodeApps)
+                self?.autoConvertManager.skipsTerminalsAndCodeEditors = enabled
             }
             .store(in: &cancellables)
 
-        $isSpellCheckEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { enabled in
-                UserDefaults.standard.set(enabled, forKey: DefaultsKeys.spellCheckEnabled)
-            }
+        $isAutoLaunchEnabled.dropFirst().removeDuplicates()
+            .sink { [weak self] enabled in self?.setAutoLaunch(enabled) }
             .store(in: &cancellables)
-            
-        $isCmdQBlockerEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)  // ИСПРАВЛЕНО: Обязательно в main thread!
+
+        $isCmdQBlockerEnabled.dropFirst().removeDuplicates()
             .sink { [weak self] enabled in
-                self?.hotkeyBlockerManager.isCmdQEnabled = enabled
-                self?.hotkeyBlockerManager.updateMonitoringState()
+                guard let self, self.hotkeyBlockerManager.isCmdQEnabled != enabled else { return }
+                self.hotkeyBlockerManager.isCmdQEnabled = enabled
+                self.hotkeyBlockerManager.saveSettings()
+                if self.isAccessibilityGranted { self.hotkeyBlockerManager.updateMonitoringState() }
             }
             .store(in: &cancellables)
-            
-        $isCmdWBlockerEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)  // ИСПРАВЛЕНО: Обязательно в main thread!
+
+        $isCmdWBlockerEnabled.dropFirst().removeDuplicates()
             .sink { [weak self] enabled in
-                self?.hotkeyBlockerManager.isCmdWEnabled = enabled
-                self?.hotkeyBlockerManager.updateMonitoringState()
+                guard let self, self.hotkeyBlockerManager.isCmdWEnabled != enabled else { return }
+                self.hotkeyBlockerManager.isCmdWEnabled = enabled
+                self.hotkeyBlockerManager.saveSettings()
+                if self.isAccessibilityGranted { self.hotkeyBlockerManager.updateMonitoringState() }
             }
             .store(in: &cancellables)
-        
-        $isSmartLayoutEnabled.dropFirst()
-            .receive(on: DispatchQueue.main)
+
+        // The blocker switches itself off when its event taps fail; mirror that into the UI.
+        hotkeyBlockerManager.$isCmdQEnabled.removeDuplicates()
             .sink { [weak self] enabled in
-                guard let self, self.smartLayoutManager.isEnabled != enabled else { return }
-                self.smartLayoutManager.isEnabled = enabled
+                if let self, self.isCmdQBlockerEnabled != enabled { self.isCmdQBlockerEnabled = enabled }
             }
             .store(in: &cancellables)
-        
-        $blockerDelay.dropFirst()
-            .receive(on: DispatchQueue.main)
+        hotkeyBlockerManager.$isCmdWEnabled.removeDuplicates()
+            .sink { [weak self] enabled in
+                if let self, self.isCmdWBlockerEnabled != enabled { self.isCmdWBlockerEnabled = enabled }
+            }
+            .store(in: &cancellables)
+
+        $blockerDelay.dropFirst().removeDuplicates()
             .sink { [weak self] delay in
                 guard let self else { return }
                 self.hotkeyBlockerManager.delay = delay
                 self.hotkeyBlockerManager.saveSettings()
             }
             .store(in: &cancellables)
-        
-        hotKeyManager.$layoutHotKey
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] hotKey in
-                self?.layoutHotKeyDisplay = hotKey.displayString
-            }
+
+        hotKeyManager.$isSecureInputActive
+            .sink { [weak self] active in self?.isSecureInputActive = active }
             .store(in: &cancellables)
-        
-        hotKeyManager.$spellCheckHotKey
+        hotKeyManager.$secureInputHolderName.sink { [weak self] in self?.secureInputHolderName = $0 }.store(in: &cancellables)
+        hotKeyManager.$isSecureInputStale.sink { [weak self] in self?.isSecureInputStale = $0 }.store(in: &cancellables)
+        hotKeyManager.$layoutHotKey.sink { [weak self] in self?.layoutHotKeyDisplay = $0.displayString }.store(in: &cancellables)
+        hotKeyManager.$spellCheckHotKey.sink { [weak self] in self?.spellCheckHotKeyDisplay = $0.displayString }.store(in: &cancellables)
+
+        keyboardLayoutManager.$currentLayout
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] hotKey in
-                self?.spellCheckHotKeyDisplay = hotKey.displayString
-            }
+            .sink { [weak self] _ in self?.windowManager.refreshStatusButton() }
             .store(in: &cancellables)
-        
+
         NotificationCenter.default.publisher(for: .layoutHotKeyPressed)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.handleHotKeyPressed(action: .changeLayout)
-            }
+            .sink { [weak self] _ in self?.handleHotKeyPressed(action: .changeLayout) }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .spellCheckHotKeyPressed)
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self = self, self.isSpellCheckEnabled else { return }
+                guard let self, self.isSpellCheckEnabled else { return }
                 self.handleHotKeyPressed(action: .fixSpelling)
             }
             .store(in: &cancellables)
     }
-    
-    func start() {
-        debugLog("🚀 Приложение запущено")
-        textTransformer.loadProfiles()
 
-        guard !ProcessRuntime.shouldSkipAccessibilityPrompt else {
-            debugLog("🧪 Skipping accessibility prompt / auto-request (test mode)")
-            return
+    /// Hotkeys run only when conversion is on and Accessibility is granted; blockers only with Accessibility.
+    /// `@Published` sinks fire before the new value is stored, so the new value is passed in.
+    private func applyServiceState(conversionEnabled: Bool? = nil) {
+        if isAccessibilityGranted && (conversionEnabled ?? isTextConversionEnabled) {
+            hotKeyManager.startMonitoring()
+        } else {
+            hotKeyManager.stopMonitoring()
         }
 
-        // AccessibilityManager monitors via Combine; request once if still denied.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if !self.isAccessibilityGranted {
-                Task {
-                    await self.accessibilityManager.requestPermissions()
-                }
-            }
+        autoConvertManager.canMonitor = isAccessibilityGranted
+
+        if isAccessibilityGranted {
+            hotkeyBlockerManager.updateMonitoringState()
+        } else if hotkeyBlockerManager.isMonitoring {
+            hotkeyBlockerManager.stop()
+        }
+        DispatchQueue.main.async { [weak self] in self?.windowManager.refreshStatusButton() }
+    }
+
+    private func setAutoLaunch(_ enabled: Bool) {
+        do {
+            try autoLaunchManager.setEnabled(enabled)
+            autoLaunchError = autoLaunchManager.requiresApproval
+                ? "Allow \(AppIdentity.displayName) in System Settings › General › Login Items."
+                : nil
+        } catch {
+            autoLaunchError = error.localizedDescription
+        }
+        let actual = autoLaunchManager.isEnabled || autoLaunchManager.requiresApproval
+        if actual != enabled {
+            DispatchQueue.main.async { [weak self] in self?.isAutoLaunchEnabled = actual }
         }
     }
-    
-    // УДАЛЕНО: updateUIState() и updateServicesBasedOnPermissions()
-    // Теперь вся логика обрабатывается через Combine subscriptions в setupBindings()
-    
+
+    func start() {
+        debugLog("🚀 Started")
+        guard !ProcessRuntime.shouldSkipAccessibilityPrompt else { return }
+        if !accessibilityManager.isGranted {
+            Task { await accessibilityManager.requestPermissions() }
+        }
+    }
+
     func stop() {
-        // УЛУЧШЕНО: stateUpdateTimer больше нет, Combine сам управляет подписками
         hotKeyManager.stopMonitoring()
         hotkeyBlockerManager.stop()
-        debugLog("⏹️ Приложение остановлено")
-    }
-    
-    // MARK: - Event Handling
-    private func handleHotKeyPressed(action: ProcessingAction) {
-        // Проверяем права доступа
-        guard isAccessibilityGranted else {
-            notificationManager.showAlert(
-                title: "Требуются разрешения",
-                message: "Для работы приложения необходимо предоставить разрешения на доступность в настройках системы.",
-                style: .warning
-            )
-            return
-        }
-        
-        if action == .changeLayout {
-            notificationManager.showHUD(text: "Converting layout...", icon: "🔄")
-        } else {
-            notificationManager.showHUD(text: "Fixing spelling...", icon: "✨")
-        }
-        
-        // HUD is already opaque; start processing on next turn without extra delay
-        DispatchQueue.main.async { [weak self] in
-            self?.textProcessingManager.processSelectedText(action: action)
-        }
+        autoConvertManager.isEnabled = false
     }
 
-    /// Same path as a real layout/spell hotkey — for integration tests.
+    // MARK: - Hotkeys
+
+    private func handleHotKeyPressed(action: ProcessingAction) {
+        guard isAccessibilityGranted else {
+            notificationManager.showHUD(text: "Accessibility access needed", symbol: "exclamationmark.triangle", duration: 1.5)
+            Task { await accessibilityManager.requestPermissions() }
+            return
+        }
+        guard !textProcessingManager.isProcessing else { return }
+        textProcessingManager.processSelectedText(action: action)
+    }
+
+    /// Same path as a real hotkey press — for integration tests.
     func triggerConversionForTesting(_ action: ProcessingAction) {
         handleHotKeyPressed(action: action)
     }
-    
-    // MARK: - Public Interface
-    func showMainWindow() {
-        windowManager.showMainWindow()
-    }
-    
-    func updateLayoutHotKey(_ newHotKey: HotKey) {
-        hotKeyManager.updateLayoutHotKey(newHotKey)
-        layoutHotKeyDisplay = newHotKey.displayString
-    }
-    
-    func updateSpellCheckHotKey(_ newHotKey: HotKey) {
-        hotKeyManager.updateSpellCheckHotKey(newHotKey)
-        spellCheckHotKeyDisplay = newHotKey.displayString
-    }
 
-    // MARK: - Hot Key Interface
+    // MARK: - Interface
+
     var layoutHotKey: HotKey {
         get { hotKeyManager.layoutHotKey }
-        set { updateLayoutHotKey(newValue) }
-    }
-    
-    var spellCheckHotKey: HotKey {
-        get { hotKeyManager.spellCheckHotKey }
-        set { updateSpellCheckHotKey(newValue) }
+        set { hotKeyManager.updateLayoutHotKey(newValue) }
     }
 
-    func saveHotKeys() {
-        hotKeyManager.saveHotKeys()
+    var spellCheckHotKey: HotKey {
+        get { hotKeyManager.spellCheckHotKey }
+        set { hotKeyManager.updateSpellCheckHotKey(newValue) }
     }
-    
+
+    /// Pause global hotkeys while the recorder listens, so the current shortcut can be typed.
     func stopKeyCapture() {
         hotKeyManager.stopMonitoring()
     }
-    
+
     func startKeyCapture() {
         guard isTextConversionEnabled, isAccessibilityGranted else { return }
         hotKeyManager.startMonitoring()
     }
-    
-    // MARK: - Static Methods
-    static func getAvailableKeyCodes() -> [KeyInfo] {
-        return KeyUtils.getAvailableKeyCodes()
-    }
-    
-    static func getAvailableModifiers() -> [(CGEventFlags, String)] {
-        return KeyUtils.getAvailableModifiers()
-    }
-    
+
     func recheckSecureInput() {
         hotKeyManager.recheckSecureInput()
     }
 
     var secureInputStatusMessage: String {
         if isSecureInputStale {
-            return "macOS session stuck after the app quit. kill won't help — lock screen (⌃⌘Q), relogin, or reboot."
+            return "The app that turned it on has quit, but macOS kept it on. Lock the screen (⌃⌘Q) and log back in."
         }
         if let secureInputHolderName, !secureInputHolderName.isEmpty {
-            return "\(secureInputHolderName) holds Secure Input. Layout hotkeys still work; Cmd+Q/W blocker may not."
+            return "\(secureInputHolderName) has Secure Input on. Conversion still works; ⌘Q/⌘W protection may not."
         }
-        return "Another app holds Secure Input. Layout hotkeys still work; Cmd+Q/W blocker may not."
-    }
-
-    // MARK: - Status Bar Icon Updates
-    private func updateStatusBarIcon() {
-        windowManager.updateStatusItemIcon(
-            isEnabled: isTextConversionEnabled && isAccessibilityGranted
-        )
+        return "Another app has Secure Input on. Conversion still works; ⌘Q/⌘W protection may not."
     }
 }

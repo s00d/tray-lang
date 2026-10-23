@@ -1,48 +1,84 @@
 import Foundation
 import AppKit
-import ApplicationServices
 
 enum ProcessingAction {
     case changeLayout
     case fixSpelling
 }
 
-class TextProcessingManager: ObservableObject {
-    /// In-process read/replace for integration tests — no Accessibility / CGEvent needed.
-    struct InProcessSelectionBridge {
-        let getSelectedText: () -> String?
-        let replaceSelectedText: (String) -> Bool
+/// Everything the conversion flow needs from the system. `SystemSelectionDriver` is the real one;
+/// tests plug in fakes that behave like specific apps (AX that lies, stale selection, line-copy editors).
+protocol SelectionDriver: AnyObject {
+    var frontmostBundleID: String? { get }
+    /// Selected text via Accessibility, nil when the app does not expose it.
+    func accessibilitySelectedText() -> String?
+    /// Whole value of the focused element via Accessibility, used to verify a replace.
+    func accessibilityFocusedValue() -> String?
+    func accessibilityReplaceSelection(with text: String) -> Bool
+    /// Copies the selection through the clipboard; nil when nothing is selected.
+    func copySelectionViaClipboard() -> String?
+    /// Puts `text` on the clipboard, pastes it and restores the clipboard; `completion` runs after restore.
+    func pasteViaClipboard(_ text: String, completion: @escaping () -> Void)
+    /// Last command line of a terminal (prompt stripped), nil when unreadable.
+    func terminalCommandLine() -> String?
+    func clearTerminalLine(characterCount: Int)
+    /// Lets the target app process events (AX writes can apply asynchronously).
+    func wait(_ seconds: TimeInterval)
+}
+
+enum ReplaceVerification {
+    enum Outcome: Equatable {
+        case applied
+        case notApplied
     }
 
-    private struct ClipboardSnapshot {
-        let items: [NSPasteboardItem]
-        let changeCount: Int
+    /// Decide whether an AX replace that reported success really happened.
+    /// Falling back to paste when the text *was* replaced inserts it twice, so anything
+    /// other than clear evidence of "nothing changed" counts as applied.
+    static func outcome(
+        original: String,
+        valueBefore: String?,
+        valueAfter: String?,
+        selectionAfter: String?
+    ) -> Outcome {
+        if let valueBefore, let valueAfter {
+            return valueBefore == valueAfter ? .notApplied : .applied
+        }
+        return selectionAfter == original ? .notApplied : .applied
     }
-    
+}
+
+final class TextProcessingManager {
     private let textTransformer: TextTransformer
     private let keyboardLayoutManager: KeyboardLayoutManager
     private let spellCheckManager: SpellCheckManager
     private let notificationManager: NotificationManager
-    
-    private var isProcessing = false
+    private let driver: SelectionDriver
+    private let switchesLayout: Bool
 
-    /// When set (tests only), conversion uses this bridge instead of AX / clipboard.
-    var inProcessSelectionBridgeForTesting: InProcessSelectionBridge?
-    
+    private(set) var isProcessing = false
+
+    /// How long to wait for an AX replace to show up before deciding it did nothing.
+    static let replaceVerificationTimeout: TimeInterval = 0.25
+
     init(
         textTransformer: TextTransformer,
         keyboardLayoutManager: KeyboardLayoutManager,
         spellCheckManager: SpellCheckManager,
-        notificationManager: NotificationManager
+        notificationManager: NotificationManager,
+        driver: SelectionDriver = SystemSelectionDriver(),
+        switchesLayout: Bool = !ProcessRuntime.isRunningUnderTests
     ) {
         self.textTransformer = textTransformer
         self.keyboardLayoutManager = keyboardLayoutManager
         self.spellCheckManager = spellCheckManager
         self.notificationManager = notificationManager
+        self.driver = driver
+        self.switchesLayout = switchesLayout
     }
-    
-    // MARK: - Main Logic
-    
+
+    // MARK: - Main flow
+
     func processSelectedText(action: ProcessingAction) {
         guard !isProcessing else {
             debugLog("⚠️ Already processing, ignoring duplicate hotkey")
@@ -50,426 +86,122 @@ class TextProcessingManager: ObservableObject {
         }
         isProcessing = true
 
-        if let bridge = inProcessSelectionBridgeForTesting {
-            processViaInProcessBridge(action: action, bridge: bridge)
+        let bundleID = driver.frontmostBundleID
+        debugLog("🚀 Bundle ID: \(bundleID ?? "?")")
+
+        if let bundleID, ConversionAppRouting.usesTerminalPath(bundleID: bundleID) {
+            processTerminal(action: action)
             return
         }
-        
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-              let bundleID = frontmostApp.bundleIdentifier else {
+
+        if let selected = driver.accessibilitySelectedText(), !selected.isEmpty {
+            replace(selected, action: action, selectedViaAccessibility: true)
+            return
+        }
+
+        guard let copied = driver.copySelectionViaClipboard(), !copied.isEmpty else {
+            debugLog("⚠️ No selection")
             finishProcessing()
             return
         }
-        
-        debugLog("🚀 APP: \(frontmostApp.localizedName ?? "?") | Bundle ID: \(bundleID)")
-        
-        // manualDeepCopy reads pasteboard data eagerly; lazy/promised types may not round-trip.
-        let snapshot = captureClipboardSnapshot()
-        
-        if ConversionAppRouting.usesTerminalPath(bundleID: bundleID) {
-            handleTerminalProcessing(app: frontmostApp, action: action, snapshot: snapshot)
+        if let bundleID, ConversionAppRouting.copiesWholeLineWithoutSelection(bundleID: bundleID),
+           ClipboardMarkerLogic.looksLikeWholeLineCopy(copied) {
+            // VS Code & co. copy the current line when nothing is selected; pasting would duplicate it.
+            debugLog("⚠️ Line copy without selection — skipping")
+            finishProcessing()
             return
         }
-        
-        attemptAccessibilityStrategy(action: action, snapshot: snapshot)
+        replace(copied, action: action, selectedViaAccessibility: false)
     }
 
-    private func processViaInProcessBridge(action: ProcessingAction, bridge: InProcessSelectionBridge) {
-        debugLog("🧪 Using in-process selection bridge (no AX)")
-
-        guard let selectedText = bridge.getSelectedText(), !selectedText.isEmpty else {
-            debugLog("🧪 Bridge: no selected text")
-            finishProcessing()
-            return
-        }
-
-        let cleanText = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let transformed: String
+    private func convert(_ text: String, action: ProcessingAction) -> (text: String, switchTo: String?) {
         switch action {
-        case .changeLayout:
-            transformed = textTransformer.transformText(cleanText)
         case .fixSpelling:
-            transformed = spellCheckManager.fixText(cleanText)
-        }
-
-        if transformed == cleanText {
-            finishProcessing()
-            return
-        }
-
-        guard bridge.replaceSelectedText(transformed) else {
-            debugLog("🧪 Bridge: replace failed")
-            finishProcessing()
-            return
-        }
-
-        // Skip system layout switch in tests — fixture only validates text transform/replace.
-        finishProcessing()
-    }
-    
-    // MARK: - Terminal Logic
-    
-    private func handleTerminalProcessing(
-        app: NSRunningApplication,
-        action: ProcessingAction,
-        snapshot: ClipboardSnapshot
-    ) {
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        
-        guard let focused = asAXUIElement(getAXAttribute(appElement, kAXFocusedUIElementAttribute as String)),
-              let fullText = getAXAttribute(focused, kAXValueAttribute as String) as? String,
-              !fullText.isEmpty else {
-            debugLog("❌ Терминал: Не удалось прочитать текст через Accessibility")
-            finishProcessing()
-            return
-        }
-        
-        let lines = fullText.components(separatedBy: .newlines)
-        guard let lastLine = lines.reversed().first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else {
-            finishProcessing()
-            return
-        }
-        
-        let commandText = TerminalPromptExtractor.extractCommand(from: lastLine)
-        if commandText.isEmpty {
-            finishProcessing()
-            return
-        }
-        
-        let transformedText: String
-        switch action {
+            return (spellCheckManager.fixText(text), nil)
         case .changeLayout:
-            transformedText = textTransformer.transformText(commandText)
-        case .fixSpelling:
-            transformedText = spellCheckManager.fixText(commandText)
+            let conversion = textTransformer.convert(text, typedInLayoutID: keyboardLayoutManager.currentLayoutID)
+            let layout = conversion.endsOn.flatMap { textTransformer.layoutIDToSelect(after: $0) }
+            return (conversion.text, layout)
         }
-        if transformedText == commandText {
+    }
+
+    private func replace(_ original: String, action: ProcessingAction, selectedViaAccessibility: Bool) {
+        let (converted, layoutID) = convert(original, action: action)
+        guard converted != original else {
+            debugLog("ℹ️ Text unchanged, skipping")
             finishProcessing()
             return
         }
-        
-        debugLog("🔄 Терминал: '\(commandText)' -> '\(transformedText)'")
-        
-        clearTerminalLine(length: commandText.count)
-        replaceTextForTerminal(transformedText, snapshot: snapshot)
-        if action == .changeLayout {
-            switchToNextLayout()
+
+        if selectedViaAccessibility, replaceViaAccessibility(original: original, converted: converted) {
+            selectLayout(layoutID)
+            finishProcessing()
+            return
         }
-    }
-    
-    private func clearTerminalLine(length: Int) {
-        let safeLength = min(length, 300)
-        sendCtrlKey(14)
-        usleep(20000)
-        
-        for _ in 0..<(safeLength + 2) {
-            sendKey(51)
-            usleep(1000)
-        }
-        usleep(50000)
-    }
-    
-    // MARK: - Pasteboard Strategies
-    
-    private func replaceTextForTerminal(_ newText: String, snapshot: ClipboardSnapshot) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.declareTypes([.string], owner: nil)
-        pasteboard.setString(newText, forType: .string)
-        let writtenChangeCount = pasteboard.changeCount
-        
-        performCmdV()
-        
-        scheduleClipboardRestore(snapshot: snapshot, writtenChangeCount: writtenChangeCount)
-    }
-    
-    private func replaceTextViaPasteboardStrategy(_ newText: String, snapshot: ClipboardSnapshot) {
-        let pasteboard = NSPasteboard.general
-        
-        pasteboard.clearContents()
-        pasteboard.declareTypes([.string, .init("org.nspasteboard.TransientType")], owner: nil)
-        pasteboard.setString(newText, forType: .string)
-        let writtenChangeCount = pasteboard.changeCount
-        
-        performCmdV()
-        
-        scheduleClipboardRestore(snapshot: snapshot, writtenChangeCount: writtenChangeCount)
-    }
-    
-    private func scheduleClipboardRestore(snapshot: ClipboardSnapshot, writtenChangeCount: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardConversionTiming.clipboardRestoreDelay) { [weak self] in
-            debugLog("📋 Restoring clipboard...")
-            self?.restoreClipboard(snapshot, ifUnchangedSince: writtenChangeCount)
+
+        driver.pasteViaClipboard(converted) { [weak self] in
             self?.finishProcessing()
         }
+        selectLayout(layoutID)
     }
-    
-    // MARK: - Standard Logic
-    
-    private func attemptAccessibilityStrategy(action: ProcessingAction, snapshot: ClipboardSnapshot) {
-        if let selectedText = getSelectedText() {
-            debugLog("✅ Text retrieved via Accessibility")
-            processTextAndReplace(selectedText, useAccessibilityReplace: true, action: action, snapshot: snapshot)
-            return
+
+    /// True when the AX write landed (or may have landed — never paste on top of it).
+    private func replaceViaAccessibility(original: String, converted: String) -> Bool {
+        let valueBefore = driver.accessibilityFocusedValue()
+        guard driver.accessibilityReplaceSelection(with: converted) else {
+            debugLog("⚠️ AX replace failed, using paste")
+            return false
         }
-        
-        debugLog("ℹ️ Accessibility failed, trying Marker Strategy via Clipboard")
-        
-        do {
-            if let text = try getSelectedTextViaMarkerStrategy(snapshot: snapshot) {
-                debugLog("✅ Text retrieved via Marker Strategy")
-                processTextAndReplace(text, useAccessibilityReplace: false, action: action, snapshot: snapshot)
-            } else {
-                debugLog("⚠️ No text selected or app blocked Cmd+C")
-                finishProcessing()
-            }
-        } catch {
-            debugLog("❌ Marker Strategy error: \(error)")
-            finishProcessing()
-        }
+
+        let deadline = Date().addingTimeInterval(Self.replaceVerificationTimeout)
+        var outcome = ReplaceVerification.Outcome.notApplied
+        repeat {
+            outcome = ReplaceVerification.outcome(
+                original: original,
+                valueBefore: valueBefore,
+                valueAfter: driver.accessibilityFocusedValue(),
+                selectionAfter: driver.accessibilitySelectedText()
+            )
+            if outcome == .applied { break }
+            driver.wait(0.02)
+        } while Date() < deadline
+
+        debugLog(outcome == .applied ? "✅ AX replace applied" : "⚠️ AX reported success but nothing changed, using paste")
+        return outcome == .applied
     }
-    
-    private func processTextAndReplace(
-        _ text: String,
-        useAccessibilityReplace: Bool,
-        action: ProcessingAction,
-        snapshot: ClipboardSnapshot
-    ) {
-        debugLog("📝 Processing text: '\(text.prefix(30))...' (length: \(text.count))")
-        
-        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        debugLog("🧹 After cleanup: '\(cleanText.prefix(30))...' (length: \(cleanText.count))")
-        
-        let transformed: String
-        switch action {
-        case .changeLayout:
-            transformed = textTransformer.transformText(cleanText)
-        case .fixSpelling:
-            transformed = spellCheckManager.fixText(cleanText)
-        }
-        debugLog("🔄 After transform: '\(transformed.prefix(30))...' (length: \(transformed.count))")
-        
-        if transformed == cleanText {
-            debugLog("ℹ️ Text unchanged after transformation, skipping")
+
+    // MARK: - Terminal
+
+    private func processTerminal(action: ProcessingAction) {
+        guard let command = driver.terminalCommandLine(), !command.isEmpty else {
+            debugLog("❌ Terminal: command line unreadable")
             finishProcessing()
             return
         }
-        
-        if useAccessibilityReplace {
-            debugLog("🔧 Attempting Accessibility replace...")
-            if replaceTextViaAccessibility(transformed) {
-                debugLog("✅ Accessibility replace returned success")
-                
-                usleep(20000)
-                
-                if let verifiedText = getSelectedText() {
-                    debugLog("🔍 Verification: got '\(verifiedText.prefix(20))...'")
-                    
-                    if verifiedText == transformed {
-                        debugLog("✅ Verification PASSED: text actually replaced")
-                        if action == .changeLayout {
-                            switchToNextLayout()
-                        }
-                        finishProcessing()
-                        return
-                    }
-                    
-                    debugLog("⚠️ Verification FAILED: AX lied, text not replaced")
-                    debugLog("📋 Falling back to Pasteboard strategy")
-                } else {
-                    debugLog("✅ Assuming AX replace succeeded (native app behavior)")
-                    if action == .changeLayout {
-                        switchToNextLayout()
-                    }
-                    finishProcessing()
-                    return
-                }
-            } else {
-                debugLog("⚠️ AX Replace returned failure, using Pasteboard")
-            }
-        }
-        
-        debugLog("📋 Using Pasteboard strategy...")
-        replaceTextViaPasteboardStrategy(transformed, snapshot: snapshot)
-        if action == .changeLayout {
-            switchToNextLayout()
-        }
-    }
-    
-    // MARK: - Marker Strategy
-    
-    private func getSelectedTextViaMarkerStrategy(snapshot: ClipboardSnapshot) throws -> String? {
-        let pasteboard = NSPasteboard.general
-        
-        let marker = UUID().uuidString
-        pasteboard.clearContents()
-        pasteboard.setString(marker, forType: .string)
-        let markerChangeCount = pasteboard.changeCount
-        
-        debugLog("🎯 Marker Strategy: Set UUID marker")
-        
-        performCmdC()
-        
-        guard PasteboardHelper.waitForPasteboardChange(
-            originalCount: markerChangeCount,
-            timeout: ClipboardConversionTiming.pasteboardChangeTimeout
-        ) else {
-            debugLog("⚠️ Marker Strategy: pasteboard did not change after Cmd+C")
-            restoreClipboard(snapshot)
-            return nil
-        }
-        
-        guard let currentContent = ClipboardMarkerLogic.capturedText(
-            marker: marker,
-            pasteboardString: pasteboard.string(forType: .string)
-        ) else {
-            debugLog("⚠️ Marker intact after copy. Nothing selected or Copy blocked.")
-            restoreClipboard(snapshot)
-            return nil
-        }
-        
-        debugLog("🎯 Marker Strategy: Text captured")
-        return currentContent
-    }
-    
-    // MARK: - Clipboard Helpers
-    
-    private func captureClipboardSnapshot() -> ClipboardSnapshot {
-        let pasteboard = NSPasteboard.general
-        return ClipboardSnapshot(
-            items: pasteboard.pasteboardItems?.map { $0.manualDeepCopy() } ?? [],
-            changeCount: pasteboard.changeCount
-        )
-    }
-    
-    private func restoreClipboard(_ snapshot: ClipboardSnapshot, ifUnchangedSince changeCount: Int? = nil) {
-        let pasteboard = NSPasteboard.general
-        
-        if let changeCount, ClipboardMarkerLogic.shouldSkipRestore(
-            currentChangeCount: pasteboard.changeCount,
-            writtenChangeCount: changeCount
-        ) {
-            debugLog("📋 Skipping clipboard restore — pasteboard changed externally")
+        let (converted, layoutID) = convert(command, action: action)
+        guard converted != command else {
+            finishProcessing()
             return
         }
-        
-        pasteboard.clearContents()
-        if !snapshot.items.isEmpty {
-            pasteboard.writeObjects(snapshot.items)
+        debugLog("🔄 Terminal: '\(command)' -> '\(converted)'")
+        driver.clearTerminalLine(characterCount: command.count)
+        driver.pasteViaClipboard(converted) { [weak self] in
+            self?.finishProcessing()
+        }
+        selectLayout(layoutID)
+    }
+
+    // MARK: - Helpers
+
+    private func selectLayout(_ layoutID: String?) {
+        guard switchesLayout, let layoutID else { return }
+        if !keyboardLayoutManager.switchToLayout(id: layoutID) {
+            debugLog("⚠️ Could not select layout \(layoutID)")
         }
     }
-    
+
     private func finishProcessing() {
         isProcessing = false
-        DispatchQueue.main.async { [weak self] in
-            self?.notificationManager.dismissHUD()
-        }
-    }
-    
-    /// Wait until Cmd/Shift/Opt/Ctrl are released so synthetic Cmd+C/V is not mangled.
-    /// Polls quickly and exits as soon as flags are clear (typical ~0–50ms after key-up).
-    private func waitForModifiersReleased(
-        timeout: TimeInterval = ClipboardConversionTiming.modifiersTimeout
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-        
-        while Date() < deadline {
-            let flags = CGEventSource.flagsState(.combinedSessionState)
-            if flags.isDisjoint(with: modifierMask) {
-                return
-            }
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.002))
-        }
-    }
-    
-    // MARK: - Input Simulation
-    
-    private func performCmdC() {
-        waitForModifiersReleased()
-        
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: false) else { return }
-        
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        
-        down.post(tap: .cghidEventTap)
-        usleep(2000)
-        up.post(tap: .cghidEventTap)
-    }
-    
-    private func performCmdV() {
-        waitForModifiersReleased()
-        
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else { return }
-        
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        
-        down.post(tap: .cghidEventTap)
-        usleep(2000)
-        up.post(tap: .cghidEventTap)
-    }
-    
-    private func sendKey(_ keyCode: CGKeyCode) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else { return }
-        
-        down.flags = []
-        up.flags = []
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-    }
-    
-    private func sendCtrlKey(_ keyCode: CGKeyCode) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else { return }
-        
-        down.flags = .maskControl
-        up.flags = .maskControl
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-    }
-    
-    // MARK: - Utilities
-    
-    private func switchToNextLayout() {
-        keyboardLayoutManager.switchToNextLayout()
-    }
-    
-    private func getAXAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
-        var result: CFTypeRef?
-        AXUIElementSetMessagingTimeout(element, 0.1)
-        let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
-        return error == .success ? result : nil
-    }
-    
-    private func asAXUIElement(_ value: CFTypeRef?) -> AXUIElement? {
-        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        return unsafeBitCast(value, to: AXUIElement.self)
-    }
-    
-    private func getSelectedText() -> String? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        guard let focused = asAXUIElement(getAXAttribute(element, kAXFocusedUIElementAttribute as String)) else { return nil }
-        
-        if let text = getAXAttribute(focused, kAXSelectedTextAttribute as String) as? String, !text.isEmpty {
-            return text
-        }
-        return nil
-    }
-    
-    private func replaceTextViaAccessibility(_ newText: String) -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        guard let focused = asAXUIElement(getAXAttribute(element, kAXFocusedUIElementAttribute as String)) else { return false }
-        return AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, newText as CFString) == .success
+        notificationManager.dismissHUD()
     }
 }

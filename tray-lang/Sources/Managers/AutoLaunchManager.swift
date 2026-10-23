@@ -1,34 +1,20 @@
 import Foundation
 import ServiceManagement
 
-// MARK: - Auto Launch Manager
-class AutoLaunchManager: ObservableObject {
-    
-    init() {}
-    
-    // MARK: - Auto Launch Management
-    func enableAutoLaunch() {
-        do {
-            let appService = SMAppService.mainApp
-            try appService.register()
-            print("✅ Автозапуск включен")
-        } catch {
-            print("❌ Ошибка включения автозапуска: \(error)")
+/// Launch at login via `SMAppService.mainApp`; the system status is the only source of truth.
+final class AutoLaunchManager {
+    private let service = SMAppService.mainApp
+
+    var isEnabled: Bool { service.status == .enabled }
+
+    /// Needs the user's OK in System Settings › General › Login Items.
+    var requiresApproval: Bool { service.status == .requiresApproval }
+
+    func setEnabled(_ enabled: Bool) throws {
+        if enabled {
+            try service.register()
+        } else {
+            try service.unregister()
         }
     }
-    
-    func disableAutoLaunch() {
-        do {
-            let appService = SMAppService.mainApp
-            try appService.unregister()
-            print("⏹️ Автозапуск отключен")
-        } catch {
-            print("❌ Ошибка отключения автозапуска: \(error)")
-        }
-    }
-    
-    func isAutoLaunchEnabled() -> Bool {
-        let appService = SMAppService.mainApp
-        return appService.status == .enabled
-    }
-} 
+}

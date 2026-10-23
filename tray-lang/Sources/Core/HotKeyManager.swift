@@ -37,34 +37,30 @@ final class HotKeyManager: ObservableObject {
         secureInputMonitor.stop()
     }
 
-    func saveEnabledState(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: DefaultsKeys.hotKeyMonitoringEnabled)
-    }
-
     // MARK: - Hot Key Management
 
     func loadHotKeys() {
         let decoder = JSONDecoder()
 
-        if let savedLayout = UserDefaults.standard.data(forKey: DefaultsKeys.savedLayoutHotKey) {
+        if let savedLayout = AppDefaults.store.data(forKey: DefaultsKeys.savedLayoutHotKey) {
             do {
                 layoutHotKey = try decoder.decode(HotKey.self, from: savedLayout)
             } catch {
-                debugLog("❌ Ошибка загрузки хоткея раскладки: \(error)")
+                debugLog("❌ Failed to load layout hotkey: \(error)")
             }
-        } else if let legacyHotKey = UserDefaults.standard.data(forKey: DefaultsKeys.savedHotKey) {
+        } else if let legacyHotKey = AppDefaults.store.data(forKey: DefaultsKeys.savedHotKey) {
             do {
                 layoutHotKey = try decoder.decode(HotKey.self, from: legacyHotKey)
             } catch {
-                debugLog("❌ Ошибка загрузки legacy хоткея: \(error)")
+                debugLog("❌ Failed to load legacy hotkey: \(error)")
             }
         }
 
-        if let savedSpell = UserDefaults.standard.data(forKey: DefaultsKeys.savedSpellCheckHotKey) {
+        if let savedSpell = AppDefaults.store.data(forKey: DefaultsKeys.savedSpellCheckHotKey) {
             do {
                 spellCheckHotKey = try decoder.decode(HotKey.self, from: savedSpell)
             } catch {
-                debugLog("❌ Ошибка загрузки хоткея орфографии: \(error)")
+                debugLog("❌ Failed to load spelling hotkey: \(error)")
             }
         }
     }
@@ -74,24 +70,24 @@ final class HotKeyManager: ObservableObject {
 
         do {
             let layoutData = try encoder.encode(layoutHotKey)
-            UserDefaults.standard.set(layoutData, forKey: DefaultsKeys.savedLayoutHotKey)
-            UserDefaults.standard.set(layoutData, forKey: DefaultsKeys.savedHotKey)
+            AppDefaults.store.set(layoutData, forKey: DefaultsKeys.savedLayoutHotKey)
+            AppDefaults.store.set(layoutData, forKey: DefaultsKeys.savedHotKey)
         } catch {
-            debugLog("❌ Ошибка сохранения хоткея раскладки: \(error)")
+            debugLog("❌ Failed to save layout hotkey: \(error)")
         }
 
         do {
             let spellData = try encoder.encode(spellCheckHotKey)
-            UserDefaults.standard.set(spellData, forKey: DefaultsKeys.savedSpellCheckHotKey)
+            AppDefaults.store.set(spellData, forKey: DefaultsKeys.savedSpellCheckHotKey)
         } catch {
-            debugLog("❌ Ошибка сохранения хоткея орфографии: \(error)")
+            debugLog("❌ Failed to save spelling hotkey: \(error)")
         }
     }
 
     func updateLayoutHotKey(_ newHotKey: HotKey) {
         layoutHotKey = newHotKey
         saveHotKeys()
-        debugLog("🔄 Хоткей обновлен: \(newHotKey.displayString)")
+        debugLog("🔄 Hotkey updated: \(newHotKey.displayString)")
         if isEnabled {
             runOnMain { self.registerLayoutHotKey() }
         }
@@ -100,7 +96,7 @@ final class HotKeyManager: ObservableObject {
     func updateSpellCheckHotKey(_ newHotKey: HotKey) {
         spellCheckHotKey = newHotKey
         saveHotKeys()
-        debugLog("🔄 Хоткей орфографии обновлен: \(newHotKey.displayString)")
+        debugLog("🔄 Spelling hotkey updated: \(newHotKey.displayString)")
         if isEnabled {
             runOnMain { self.registerSpellCheckHotKey() }
         }
@@ -116,7 +112,7 @@ final class HotKeyManager: ObservableObject {
             self.registerLayoutHotKey()
             self.registerSpellCheckHotKey()
             self.isEnabled = true
-            debugLog("✅ Мониторинг горячих клавиш запущен (RegisterEventHotKey)")
+            debugLog("✅ Hotkeys registered")
         }
     }
 
@@ -127,7 +123,7 @@ final class HotKeyManager: ObservableObject {
             self.unregisterLayoutHotKey()
             self.unregisterSpellCheckHotKey()
             self.isEnabled = false
-            debugLog("⏹️ Мониторинг горячих клавиш остановлен")
+            debugLog("⏹️ Hotkeys unregistered")
         }
     }
 
@@ -173,19 +169,14 @@ final class HotKeyManager: ObservableObject {
 
         guard status == noErr else { return status }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-
-            switch hotKeyID.id {
-            case RegisteredHotKeyID.layout.rawValue:
-                debugLog("🎯 Горячая клавиша раскладки сработала!")
-                NotificationCenter.default.post(name: .layoutHotKeyPressed, object: nil)
-            case RegisteredHotKeyID.spellCheck.rawValue:
-                debugLog("🎯 Горячая клавиша орфографии сработала!")
-                NotificationCenter.default.post(name: .spellCheckHotKeyPressed, object: nil)
-            default:
-                break
-            }
+        // Carbon delivers application-target hotkeys on the main thread already.
+        switch hotKeyID.id {
+        case RegisteredHotKeyID.layout.rawValue:
+            NotificationCenter.default.post(name: .layoutHotKeyPressed, object: nil)
+        case RegisteredHotKeyID.spellCheck.rawValue:
+            NotificationCenter.default.post(name: .spellCheckHotKeyPressed, object: nil)
+        default:
+            break
         }
 
         return noErr
@@ -279,16 +270,8 @@ final class HotKeyManager: ObservableObject {
                 self.isSecureInputStale = status.isStaleHolder
             }
             self.secureInputMonitor.start()
-            debugLog("✅ Мониторинг Secure Input запущен")
+            debugLog("✅ Secure Input monitoring started")
         }
-    }
-
-    private func stopSecureInputMonitoring() {
-        secureInputMonitor.stop()
-        isSecureInputActive = false
-        secureInputHolderName = nil
-        isSecureInputStale = false
-        debugLog("⏹️ Мониторинг Secure Input остановлен")
     }
 
     func recheckSecureInput() {

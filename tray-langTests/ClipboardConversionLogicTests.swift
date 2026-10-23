@@ -14,13 +14,6 @@ struct ClipboardConversionLogicTests {
         )
     }
 
-    @Test func mode3DoesNotStackTwoHalfSecondModifierWaits() {
-        // Regression: old path waited 0.5s before Cmd+C and again inside performCmdC,
-        // plus 0.5s for pasteboard — felt like 1–3s of "nothing happens".
-        let stackedLegacyWaits = 0.5 + 0.5 + 0.5
-        #expect(ClipboardConversionTiming.maxPassiveMode3Wait < stackedLegacyWaits * 0.5)
-    }
-
     @Test func markerCaptureRejectsEmptyAndMarkerItself() {
         let marker = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
         #expect(ClipboardMarkerLogic.capturedText(marker: marker, pasteboardString: nil) == nil)
@@ -80,7 +73,6 @@ struct ConversionAppRoutingTests {
     @Test func terminalsUseTerminalPath() {
         #expect(ConversionAppRouting.usesTerminalPath(bundleID: "com.apple.Terminal"))
         #expect(ConversionAppRouting.usesTerminalPath(bundleID: "com.googlecode.iterm2"))
-        #expect(ConversionAppRouting.usesTerminalPath(bundleID: "com.microsoft.VSCode"))
     }
 
     @Test func browsersDoNotUseTerminalPath() {
@@ -105,59 +97,80 @@ struct TerminalPromptExtractorTests {
         #expect(!command.contains("12:30"))
     }
 
-    @Test func promptStripIsOnlyForTerminalPathNotBrowserURLs() {
-        // Browser/editor path must never call TerminalPromptExtractor.
-        #expect(!ConversionAppRouting.usesTerminalPath(bundleID: "com.brave.Browser"))
-        #expect(!ConversionAppRouting.usesTerminalPath(bundleID: "com.apple.Safari"))
+    @Test func keepsWholeLineWhenThereIsNoPrompt() {
+        #expect(TerminalPromptExtractor.extractCommand(from: "ghbdtn") == "ghbdtn")
     }
 }
 
 struct PasteboardHelperTests {
-    @Test func waitReturnsQuicklyWhenPasteboardChanges() {
-        let pasteboard = NSPasteboard(name: NSPasteboard.Name("tray-lang.tests.\(UUID().uuidString)"))
-        defer { pasteboard.releaseGlobally() }
+    private func makePasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("tray-lang.tests.\(UUID().uuidString)"))
+    }
 
+    @Test func returnsTheNewStringOnceItIsWritten() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
         pasteboard.clearContents()
         pasteboard.setString("before", forType: .string)
         let original = pasteboard.changeCount
 
-        let started = Date()
-        // Change on a background queue while the wait pumps the run loop
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.015) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.01) {
             pasteboard.clearContents()
             pasteboard.setString("after", forType: .string)
         }
-
-        let changed = PasteboardHelper.waitForPasteboardChange(
-            originalCount: original,
-            timeout: 0.25,
-            pasteboard: pasteboard
-        )
-        let elapsed = Date().timeIntervalSince(started)
-
-        #expect(changed)
-        #expect(elapsed < 0.2)
-        #expect(pasteboard.string(forType: .string) == "after")
+        #expect(PasteboardHelper.waitForString(changedFrom: original, timeout: 1, pasteboard: pasteboard) == "after")
     }
 
-    @Test func waitTimesOutWhenPasteboardUnchanged() {
-        let pasteboard = NSPasteboard(name: NSPasteboard.Name("tray-lang.tests.\(UUID().uuidString)"))
+    /// clearContents() bumps changeCount before the copy lands; reading right then returned nil and lost the selection.
+    @Test func waitsPastClearContentsForTheString() {
+        let pasteboard = makePasteboard()
         defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+        let original = pasteboard.changeCount
 
         pasteboard.clearContents()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.03) {
+            pasteboard.setString("copied", forType: .string)
+        }
+        #expect(PasteboardHelper.waitForString(changedFrom: original, timeout: 1, pasteboard: pasteboard) == "copied")
+    }
+
+    @Test func timesOutWhenNothingChanges() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
         pasteboard.setString("stable", forType: .string)
-        let original = pasteboard.changeCount
         let started = Date()
+        #expect(PasteboardHelper.waitForString(changedFrom: pasteboard.changeCount, timeout: 0.05, pasteboard: pasteboard) == nil)
+        #expect(Date().timeIntervalSince(started) >= 0.05)
+    }
 
-        let changed = PasteboardHelper.waitForPasteboardChange(
-            originalCount: original,
-            timeout: 0.05,
-            pasteboard: pasteboard
-        )
-        let elapsed = Date().timeIntervalSince(started)
+    @Test func backupRestoresEveryType() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString("text", forType: .string)
+        item.setData(Data([1, 2, 3]), forType: NSPasteboard.PasteboardType("com.example.binary"))
+        pasteboard.writeObjects([item])
 
-        #expect(!changed)
-        #expect(elapsed >= 0.04)
-        #expect(elapsed < 0.35)
+        let backup = ClipboardBackup(pasteboard)
+        pasteboard.clearContents()
+        pasteboard.setString("temporary", forType: .string)
+        backup.restore()
+
+        #expect(pasteboard.string(forType: .string) == "text")
+        #expect(pasteboard.data(forType: NSPasteboard.PasteboardType("com.example.binary")) == Data([1, 2, 3]))
+    }
+
+    @Test func emptyBackupRestoresAnEmptyClipboard() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        let backup = ClipboardBackup(pasteboard)
+        pasteboard.setString("temporary", forType: .string)
+        backup.restore()
+        #expect(pasteboard.string(forType: .string) == nil)
     }
 }

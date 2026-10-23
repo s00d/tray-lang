@@ -17,4 +17,7 @@ enum DefaultsKeys {
     static let activeProfileID = "activeProfileID"
     static let userProfiles = "userProfiles"
     static let customSymbols = "customSymbols"
+    static let autoConvertEnabled = "autoConvertEnabled"
+    static let autoConvertSound = "autoConvertSound"
+    static let autoConvertSkipCodeApps = "autoConvertSkipCodeApps"
 }

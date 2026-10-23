@@ -20,98 +20,36 @@ A powerful macOS application that transforms text between keyboard layouts, prev
 
 ## What it does
 
-**Text Transformation**: Select any text, press a hotkey, and it transforms between Russian/English layouts while automatically switching your keyboard layout.
+**Text Transformation**: Select text typed in the wrong layout, press a hotkey, and it is retyped as if the right layout had been on — `ghbdtn` → `привет`, `руддщ` → `hello`, and mixed text like `фыва ghjjk` → `asdf проол` in one go. Press again to undo. The keyboard layout switches to match.
 
-**Smart Layout Switching**: Automatically remembers and switches keyboard layouts for each application. Set default rules for specific apps or let the app learn your preferences.
+**Fix While Typing** (off by default): when you press Space after a word that only makes sense in the other layout — `ghbdtn` → `привет`, `руддщ` → `hello` — it is retyped and the layout switches, with a barely audible 75 ms tone. Press Delete right away to undo; that word is then left alone.
 
-**Hotkey Blocker**: Prevents accidental Cmd+Q quits and Cmd+W window closes. Hold Cmd+Q for 1-5 seconds to actually quit an app, or hold Cmd+W to close windows. Both protections can be enabled independently.
+**Smart Layout Switching**: Remembers the layout you used in each app and restores it, with optional fixed rules per app.
+
+**Quit Protection**: A quick ⌘Q / ⌘W shows a reminder; hold it for 1–5 seconds to actually quit or close.
 
 ## Quick Start
 
-1. **Download & Run**: Build from source or download the app
-2. **Grant Permissions**: Allow accessibility access when prompted
-3. **Configure Hotkey**: Set your preferred key combination in Settings
-4. **Use**: Select text → press hotkey → text transforms
-5. **Enable Smart Layout**: Toggle "Smart Layout" to automatically switch layouts per app
+1. Build from source (`make build`) or download a release
+2. Allow Accessibility access when asked
+3. Select text → press **⌘1** (change it in Settings › General)
 
-## Features
+## How conversion works
 
-### Text Transformation
-- Transform text between Russian ↔ English layouts
-- Customizable character mappings
-- Automatic keyboard layout switching
-- Works in any application
-- Reliable clipboard-based text processing
+- **Key tables come from macOS.** Every profile is a pair of keyboard layouts installed on your Mac; the app asks macOS (`UCKeyTranslate`) what each key types on each layout. Nothing is hard-coded, so Russian (Mac) and Russian – PC, Ukrainian, Belarusian, Greek, Hebrew, Arabic, German, French, Nordic, Dvorak, Colemak… are all exact, including dead keys.
+- **Auto profile** (default) pairs your latin layout with the first other layout enabled in System Settings › Keyboard › Input Sources. Pick any other installed layout in Settings › Conversion, or make a custom table by duplicating one.
+- **Per word.** Letters always flip to the other layout. Punctuation that exists on both layouts (`.` `,` `;` `"`…) follows the word it is in, so `ghbdtn^` becomes `привет,` on Russian (Mac) and `ghbdtn?` becomes `привет,` on Russian – PC.
+- **Replacing the text** tries Accessibility first and checks that the app really changed the text before falling back to the clipboard, so text is never inserted twice. Copy and paste go through the app's own Edit menu when it has one (works on any layout), with ⌘C/⌘V as the last resort. The clipboard is restored afterwards unless something else wrote to it.
+- **While typing**, only the current word is kept in memory, checked against the macOS dictionaries when you press Space, and only between different scripts (Latin ↔ Cyrillic/Greek/Hebrew…). Digits, `@`, `/`, `_` and terminals/code editors are skipped. The word is retyped with Unicode key events (no clipboard), and the app ignores its own events. While the feature is off no key monitor is installed at all.
+- **Terminals** (Terminal, iTerm2, Warp, kitty, …): the current command line is converted. Editors that copy the whole line without a selection (VS Code, Cursor, JetBrains, Sublime, Zed) are recognised, so nothing is pasted when nothing is selected.
 
-### Smart Layout Manager
-- **Automatic Learning**: Remembers the last used keyboard layout for each application
-- **Default Rules**: Set permanent layout rules for specific applications with highest priority
-- **Remembered Layouts**: View and manage automatically saved layouts
-- **Pin to Rules**: Convert remembered layouts to permanent default rules with one click
-- **Priority System**: Default rules always take precedence over remembered layouts
-- **Visual Management**: Modern UI with app icons and clear organization
+## Settings
 
-### Hotkey Blocker Protection
-- **Cmd+Q Protection**: Hold Cmd+Q for 1-5 seconds to quit apps
-- **Cmd+W Protection**: Hold Cmd+W for 1-5 seconds to close windows
-- Single press shows notification, prevents action
-- Exclude specific apps from protection
-- Track prevented accidental quits and closes separately
-- Independent enable/disable for each protection
-- Configurable hold delay (1-5 seconds)
-
-### Modern User Interface
-- **NavigationSplitView**: Clean, native macOS settings interface
-- **System Tray Menu**: Native NSMenu with dynamic status updates
-- **Status Indicators**: Real-time visual feedback for all features
-- **Organized Settings**: Categorized settings in General, Diagnostics, and About sections
-- **Modal Windows**: Modern sheet presentations for configuration
-- **App Icons**: Visual app identification in all lists
-
-### Convenience
-- System tray access with native menu design
-- Auto-launch with system
-- Customizable hotkeys
-- Visual feedback with HUD notifications
-- Native macOS appearance (light/dark theme support)
-- Dock icon management (appears only when settings window is open)
-
-## Configuration
-
-### Main Settings Window
-Access all settings through the main window:
-- **General**: Main hotkey, behavior, smart switcher, conversion, and protection settings
-- **Diagnostics**: Test text conversion functionality
-- **About**: Application information and features
-
-### Hotkey Setup
-1. Open Settings → General → Main Hotkey
-2. Click the hotkey button to open Hotkey Editor
-3. Press "Start capture" and your desired keys
-4. Press "Confirm" to save
-
-### Smart Layout Configuration
-1. **Enable Smart Layout**: Toggle "Smart Layout" in General settings
-2. **Default Rules**: Click "Configure..." to set permanent layout rules
-   - Add applications manually
-   - Set preferred layout for each app
-   - Rules have highest priority
-3. **Remembered Layouts**: View automatically saved layouts
-   - Pin remembered layouts to convert them to default rules
-   - Automatically updated as you work in different apps
-
-### Hotkey Blocker Settings
-- **Cmd+Q Protection**: Enable/disable quit protection
-- **Cmd+W Protection**: Enable/disable window close protection
-- **Hold Delay**: Set hold time (1-5 seconds)
-- **Exclusions**: Manage apps that bypass protection
-  - Add applications with visual app picker
-  - View excluded apps with icons and bundle IDs
-
-### Character Mappings
-- Edit via Settings → General → Conversion → "Edit..." button
-- Add custom character mappings
-- Use ready-made language templates
+- **Menu bar**: current layout and warnings; Text (Convert Selection, Fix While Typing, Fix Spelling, Layouts); Apps (Layout per App, Hold ⌘Q / ⌘W); Settings…, About, Quit.
+- **General**: permissions status, hotkeys (click and press a new shortcut), fixing while typing, launch at login.
+- **Conversion**: profile, a live "Try It" field, the key table, custom profiles.
+- **Smart Layout**: on/off, per-app rules, remembered layouts.
+- **Quit Protection**: ⌘Q / ⌘W, hold time, statistics, excluded apps.
 
 ## Requirements
 
@@ -129,63 +67,33 @@ make build
 
 ## Troubleshooting
 
-**Hotkey not working?**
-- Check accessibility permissions in System Settings
-- Try different key combination
-- Ensure the app has accessibility access
+**Nothing happens on the hotkey** — check Settings › General: Accessibility must be granted and "Convert keyboard layout" on. If another app holds Secure Input (password fields, some terminals), macOS blocks reading keys; the settings show which app.
 
-**Hotkey Blocker not working?**
-- Ensure Cmd+Q and/or Cmd+W protection is enabled in Settings
-- Check accessibility permissions
-- Verify app isn't in exclusion list
-- Check that protection is enabled in the status indicators
+**Punctuation converts to the wrong sign** — pick the exact layout you type on in Settings › Conversion (for example Russian vs Russian – PC); Auto uses the first non-latin layout you have enabled.
 
-**Text not transforming?**
-- Make sure text is selected
-- Check character mappings in Symbols Editor
-- Verify accessibility permissions
-- Ensure Text Conversion is enabled in Settings
-
-**Smart Layout not working?**
-- Ensure "Smart Layout" is enabled in Settings
-- Check that you're switching between applications
-- Verify keyboard layouts are available in System Settings
-- Check status indicator in Settings window
-
-**Dock icon appears unexpectedly?**
-- Dock icon only appears when Settings window is open
-- This is normal behavior - the app runs from the menu bar
+**Dock icon appears** — only while the Settings window is open, so it can come to the front.
 
 ## Architecture
 
-Built with SwiftUI and AppKit using modern macOS patterns:
+AppKit status item and windows hosting SwiftUI views (a SwiftUI `MenuBarExtra` + `Settings` scene cannot reliably bring its window to the front from a menu bar app).
 
-### Core Components
-- `AppCoordinator`: Main application coordinator, orchestrates all components
-- `AccessibilityManager`: Handles accessibility permissions and status monitoring
-- `HotKeyManager`: Global hotkey monitoring and event handling
-- `KeyboardLayoutManager`: Keyboard layout detection and switching with system language codes
-- `TextTransformer`: Layout conversion logic
-- `TextProcessingManager`: Clipboard-based text selection and replacement
+- `AppCoordinator` — owns the managers, wires settings to services
+- `SystemKeyboardLayouts` — reads key tables of macOS layouts (`TISInputSource` + `UCKeyTranslate`); TIS calls are kept on the main thread
+- `TextTransformer` — profiles and the per-word conversion
+- `TextProcessingManager` — hotkey flow: read selection → convert → replace → switch layout; talks to the system only through `SelectionDriver`
+- `SystemSelectionDriver` — Accessibility, Edit-menu actions, clipboard, synthetic keys
+- `KeyboardLayoutManager`, `SmartLayoutManager`, `HotKeyManager` (Carbon hotkeys), `HotkeyBlockerManager` (event taps), `SpellCheckManager`
+- `WindowManager` — menu bar menu, main menu, settings window
 
-### Feature Managers
-- `SmartLayoutManager`: Per-application layout memory and rule management
-- `HotkeyBlockerManager`: Cmd+Q and Cmd+W protection with hold delay
-- `ExclusionManager`: App exclusion handling with visual management
-- `AutoLaunchManager`: System login item management
+## Testing
 
-### UI Components
-- `WindowManager`: Native NSMenu tray integration and window management
-- `ContentView`: NavigationSplitView-based main settings interface
-- `GeneralSettingsView`: Consolidated settings view with status indicators
-- `DefaultLayoutsView`: Smart layout rules and remembered layouts management
-- `ExclusionsView`: Modern exclusion management with app icons
+```bash
+make test
+```
 
-### Data Models
-- `KeyboardLayout`: Structured layout information (ID, localized name, short name)
-- `AppLayoutRule`: Default layout rules for applications
-- `RememberedLayout`: Automatically saved layout preferences
-- `ExcludedApp`: Applications excluded from hotkey blocker
+Runs the unit tests ad-hoc signed (no developer certificate needed) and writes the full log to `build/test.log`. Under tests the app does not create its menu bar item, uses a throwaway UserDefaults suite and never touches the real clipboard, layouts or Accessibility: the hotkey flow runs against fake apps (`FakeTextApp`) that reproduce native fields, apps that lie about Accessibility writes, stale selections, line-copying editors and terminals. Every key of every built-in layout is checked to convert there and back.
+
+`make test-ui` launches the real app and needs Accessibility for the test runner.
 
 ## License
 

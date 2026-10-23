@@ -1,7 +1,7 @@
 # Makefile for Tray Lang Development
 # Provides convenient commands for common development tasks
 
-.PHONY: help build test clean install-deps build-universal create-dmg release
+.PHONY: help build test test-ui clean install-deps build-universal create-dmg release
 
 # Default target
 help:
@@ -9,7 +9,8 @@ help:
 	@echo ""
 	@echo "  make build              - Build the app in Debug configuration"
 	@echo "  make build-release      - Build the app in Release configuration"
-	@echo "  make test               - Run unit and UI tests"
+	@echo "  make test               - Run unit tests (log: build/test.log)"
+	@echo "  make test-ui            - Run UI tests (launches the app)"
 	@echo "  make clean              - Clean build artifacts"
 	@echo "  make install-deps       - Install development dependencies"
 	@echo "  make build-universal    - Build universal binary (Intel + Apple Silicon)"
@@ -54,9 +55,20 @@ build-release:
 		echo "📦 Application built at: build/Release/tray-lang.app"; \
 	fi
 
-# Test targets
+# Test targets (ad-hoc signed: no developer certificate needed; logs go to build/test.log)
+TEST_FLAGS = -project tray-lang.xcodeproj -scheme tray-lang -destination 'platform=macOS' \
+	CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+
 test:
-	xcodebuild test -project tray-lang.xcodeproj -scheme tray-lang -destination 'platform=macOS'
+	@mkdir -p build
+	xcodebuild test $(TEST_FLAGS) -only-testing:tray-langTests > build/test.log 2>&1; \
+	status=$$?; grep -E "Test run with|tests? (passed|failed)|✘|error:" build/test.log; echo "Full log: build/test.log"; exit $$status
+
+# UI tests launch the real app and need Accessibility for the test runner.
+test-ui:
+	@mkdir -p build
+	xcodebuild test $(TEST_FLAGS) -only-testing:tray-langUITests > build/test-ui.log 2>&1; \
+	status=$$?; grep -E "Executed|error:" build/test-ui.log; echo "Full log: build/test-ui.log"; exit $$status
 
 # Clean target
 clean:

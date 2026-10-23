@@ -22,7 +22,6 @@ struct ExcludedApp: Identifiable, Codable, Equatable {
     /// The path to the app
     var path: String
     
-    // Вспомогательное свойство для получения иконки приложения
     var appIcon: NSImage {
         return IconCache.shared.icon(for: bundleID)
     }

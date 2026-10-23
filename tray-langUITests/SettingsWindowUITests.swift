@@ -30,6 +30,7 @@ final class SettingsWindowUITests: XCTestCase {
         XCTAssertTrue(settingsWindow.waitForExistence(timeout: 10))
 
         XCTAssertTrue(app.staticTexts["General"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Accessibility"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Convert keyboard layout"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Quit Protection"].exists)
     }
 }

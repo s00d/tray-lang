@@ -1,300 +1,173 @@
 import Foundation
 import AppKit
 
-// MARK: - HUD Alert View
-class HUDAlertView: NSView {
-    private let containerView = NSView()
-    private let textLabel = NSTextField()
-    private let iconLabel = NSTextField()
-    private let progressView = NSView()
-    private let progressBar = NSView()
-    private var progressTimer: Timer?
-    private var totalDuration: TimeInterval = 0
-    private var elapsedTime: TimeInterval = 0
+// MARK: - HUD view
+
+/// System-style HUD: blurred rounded panel, SF Symbol, one line of text, optional hold progress.
+final class HUDAlertView: NSVisualEffectView {
+    private let iconView = NSImageView()
+    private let textLabel = NSTextField(labelWithString: "")
+    private let progress = NSProgressIndicator()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        setupView()
+        material = .hudWindow
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 18
+        layer?.masksToBounds = true
+
+        iconView.symbolConfiguration = .init(pointSize: 34, weight: .regular)
+        iconView.contentTintColor = .labelColor
+
+        textLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        textLabel.alignment = .center
+        textLabel.lineBreakMode = .byTruncatingTail
+
+        progress.style = .bar
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 1
+        progress.controlSize = .small
+
+        let stack = NSStackView(views: [iconView, textLabel, progress])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
+            progress.widthAnchor.constraint(equalToConstant: 180),
+        ])
     }
 
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupView()
+        fatalError("init(coder:) is not used")
     }
 
-    private func setupView() {
-        wantsLayer = true
-        layer?.cornerRadius = 16
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
-        layer?.masksToBounds = true
-        
-        // Add subtle border
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.1).cgColor
-        
-        // Add shadow
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.3
-        layer?.shadowOffset = CGSize(width: 0, height: 4)
-        layer?.shadowRadius = 8
+    var currentText: String { textLabel.stringValue }
 
-        // Container view for better layout
-        containerView.wantsLayer = true
-        containerView.layer?.backgroundColor = NSColor.clear.cgColor
-        addSubview(containerView)
-
-        // Icon label with larger size
-        iconLabel.stringValue = "🔒"
-        iconLabel.textColor = NSColor.white
-        iconLabel.font = NSFont.systemFont(ofSize: 32, weight: .medium)
-        iconLabel.alignment = .center
-        iconLabel.isEditable = false
-        iconLabel.isBordered = false
-        iconLabel.backgroundColor = NSColor.clear
-        iconLabel.frame = NSRect(x: 0, y: 50, width: 300, height: 40)
-        containerView.addSubview(iconLabel)
-
-        // Text label with better styling
-        textLabel.stringValue = "Hold Cmd+Q to quit"
-        textLabel.textColor = NSColor.white
-        textLabel.font = NSFont.systemFont(ofSize: 16, weight: .medium)
-        textLabel.alignment = .center
-        textLabel.isEditable = false
-        textLabel.isBordered = false
-        textLabel.backgroundColor = NSColor.clear
-        textLabel.frame = NSRect(x: 0, y: 10, width: 300, height: 30)
-        containerView.addSubview(textLabel)
-        
-        // Progress background
-        progressView.wantsLayer = true
-        progressView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.2).cgColor
-        progressView.layer?.cornerRadius = 2
-        progressView.frame = NSRect(x: 50, y: 5, width: 200, height: 4)
-        containerView.addSubview(progressView)
-        
-        // Progress bar (fills from right to left)
-        progressBar.wantsLayer = true
-        progressBar.layer?.backgroundColor = NSColor.white.cgColor
-        progressBar.layer?.cornerRadius = 2
-        progressBar.frame = NSRect(x: 50, y: 5, width: 200, height: 4)
-        containerView.addSubview(progressBar)
-    }
-
-    func updateText(_ text: String, icon: String = "🔒") {
+    func update(text: String, symbol: String) {
         textLabel.stringValue = text
-        iconLabel.stringValue = icon
+        iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
     }
 
-    var currentTextForTesting: String { textLabel.stringValue }
-    
+    /// Fills the bar over `duration` with one Core Animation pass instead of a 20 Hz timer.
     func startProgress(duration: TimeInterval) {
-        stopProgress()
-        totalDuration = max(duration, 0.05)
-        elapsedTime = 0
-        
-        progressBar.frame = NSRect(x: 50, y: 5, width: 0, height: 4)
-        
-        // .common — таймер тикает пока пользователь держит Cmd+Q (eventTracking mode).
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.updateProgress()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        progressTimer = timer
-    }
-    
-    private func updateProgress() {
-        elapsedTime += 0.05
-        
-        let progress = elapsedTime / totalDuration
-        let currentWidth = 200 * progress
-        
-        // Ensure progress doesn't exceed bounds
-        let clampedWidth = min(max(currentWidth, 0), 200)
-        
-        // Animate progress bar filling from left to right
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.05
+        progress.isHidden = false
+        progress.doubleValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .linear)
-            progressBar.animator().frame = NSRect(x: 50, y: 5, width: clampedWidth, height: 4)
-        })
-        
-        if progress >= 1.0 {
-            progressTimer?.invalidate()
-            progressTimer = nil
+            progress.animator().doubleValue = 1
         }
     }
-    
-    func stopProgress() {
-        progressTimer?.invalidate()
-        progressTimer = nil
-        
-        // Reset progress bar to initial state
-        progressBar.frame = NSRect(x: 50, y: 5, width: 0, height: 4)
-    }
-    
-    override func layout() {
-        super.layout()
-        
-        // Center container view
-        containerView.frame = NSRect(
-            x: (bounds.width - 300) / 2,
-            y: (bounds.height - 90) / 2,
-            width: 300,
-            height: 90
-        )
+
+    func hideProgress() {
+        progress.isHidden = true
+        progress.doubleValue = 0
     }
 }
 
-// MARK: - Non-activating HUD panel (never steals keyboard focus)
+// MARK: - HUD window
+
+/// Never becomes key, so showing it does not steal focus from the app being edited.
 private final class HUDPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 
-// MARK: - HUD Alert Manager
-class HUDAlertManager {
+final class HUDAlertManager {
     static let shared = HUDAlertManager()
 
-    private var window: HUDPanel
-    private var delayer: DispatchWorkItem?
-    private var isPresentedForTesting = false
+    private static let size = NSSize(width: 300, height: 130)
+    private let window: HUDPanel
+    private let hudView: HUDAlertView
+    private var dismissWork: DispatchWorkItem?
+    private(set) var isVisible = false
 
     private init() {
         window = HUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
+            contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
-            defer: false
+            defer: true
         )
-
         window.level = .floating
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = false
+        window.hasShadow = true
         window.ignoresMouseEvents = true
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        window.isFloatingPanel = true
-        window.becomesKeyOnlyIfNeeded = true
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.hidesOnDeactivate = false
-
-        let hudView = HUDAlertView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
-        window.contentView = hudView
         window.identifier = NSUserInterfaceItemIdentifier("tray-lang.hud")
-        window.setAccessibilityIdentifier("tray-lang.hud")
+
+        hudView = HUDAlertView(frame: NSRect(origin: .zero, size: Self.size))
+        window.contentView = hudView
     }
 
-    /// Visible to unit/UI tests (nonactivating panel is otherwise hard to assert).
-    var isHUDVisibleForTesting: Bool { isPresentedForTesting }
+    var currentText: String? { isVisible ? hudView.currentText : nil }
 
-    private(set) var lastShownTextForTesting: String?
+    /// - Parameter duration: when set, shows a progress bar and hides itself after that time.
+    func show(text: String, symbol: String, duration: TimeInterval? = nil) {
+        dismissWork?.cancel()
+        hudView.update(text: text, symbol: symbol)
+        isVisible = true
 
-    var hudTextForTesting: String? {
-        lastShownTextForTesting ?? (window.contentView as? HUDAlertView)?.currentTextForTesting
-    }
-
-    func showHUD(text: String, icon: String = "🔒", delayTime: TimeInterval? = nil) {
-        let screenRect = NSScreen.main?.visibleFrame
-            ?? NSScreen.screens.first?.visibleFrame
-            ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-
-        // Cancel previous delay if exists
-        delayer?.cancel()
-        lastShownTextForTesting = text
-        isPresentedForTesting = true
-
-        // Update HUD content
-        if let hudView = window.contentView as? HUDAlertView {
-            hudView.updateText(text, icon: icon)
-            
-            // Stop any existing progress before starting new one
-            hudView.stopProgress()
-            
-            // Start progress bar if delay is specified
-            if let delayTime = delayTime {
-                hudView.startProgress(duration: delayTime)
-            }
-        }
-
-        // Position window in center
-        let newRect = NSRect(
-            x: (screenRect.size.width - 320) * 0.5,
-            y: (screenRect.size.height - 120) * 0.5,
-            width: 320,
-            height: 120
-        )
-        window.setFrame(newRect, display: true)
-
-        // Show without becoming key / activating the app
-        if delayTime != nil {
-            // Hold-to-quit HUD: opaque immediately (fade-in never paints under key hold).
-            window.alphaValue = 1.0
-            window.orderFrontRegardless()
-            window.displayIfNeeded()
-            delayer = DispatchWorkItem { [weak self] in
-                self?.dismissHUD()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + delayTime!, execute: delayer!)
+        if let duration {
+            hudView.startProgress(duration: duration)
+            let work = DispatchWorkItem { [weak self] in self?.dismiss() }
+            dismissWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
         } else {
-            // Conversion HUD: show immediately at full opacity; caller dismisses when done.
-            // Mode 3 (clipboard) blocks main with usleep — fade-in never paints otherwise.
-            window.alphaValue = 1.0
-            window.orderFrontRegardless()
-            window.displayIfNeeded()
+            hudView.hideProgress()
         }
+
+        // Screen with the mouse — that's where the user is looking; visibleFrame origin matters on secondary screens.
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+        let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        window.setFrameOrigin(NSPoint(x: frame.midX - Self.size.width / 2, y: frame.midY - Self.size.height / 2))
+        window.alphaValue = 1
+        // Paint now: conversion runs synchronously on main right after this.
+        window.orderFrontRegardless()
+        window.displayIfNeeded()
     }
 
-    func dismissHUD(fade: Bool = true) {
-        delayer?.cancel()
-        isPresentedForTesting = false
-
-        // Stop progress bar
-        if let hudView = window.contentView as? HUDAlertView {
-            hudView.stopProgress()
-        }
-
-        guard fade else {
+    func dismiss(animated: Bool = true) {
+        dismissWork?.cancel()
+        dismissWork = nil
+        guard isVisible else { return }
+        isVisible = false
+        guard animated else {
             window.orderOut(nil)
-            window.alphaValue = 0
             return
         }
-
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.3
+            context.duration = 0.2
             window.animator().alphaValue = 0
-        }) {
+        }, completionHandler: { [weak self] in
+            guard let self, !self.isVisible else { return }
             self.window.orderOut(nil)
-        }
+        })
     }
 }
 
-// MARK: - Notification Manager
-class NotificationManager: ObservableObject {
-    var isHUDVisibleForTesting: Bool { HUDAlertManager.shared.isHUDVisibleForTesting }
-    var hudTextForTesting: String? { HUDAlertManager.shared.hudTextForTesting }
+// MARK: - Notification manager
 
-    // MARK: - HUD Notifications
-    func showHUD(text: String, icon: String = "ℹ️", delayTime: TimeInterval? = nil) {
-        HUDAlertManager.shared.showHUD(text: text, icon: icon, delayTime: delayTime)
+final class NotificationManager {
+    var isHUDVisible: Bool { HUDAlertManager.shared.isVisible }
+    var hudText: String? { HUDAlertManager.shared.currentText }
+
+    func showHUD(text: String, symbol: String, duration: TimeInterval? = nil) {
+        HUDAlertManager.shared.show(text: text, symbol: symbol, duration: duration)
     }
 
-    func dismissHUD() {
-        HUDAlertManager.shared.dismissHUD()
-    }
-
-    // MARK: - Alert Dialogs
-    func showAlert(title: String, message: String, style: NSAlert.Style = .informational) {
-        // Modal alerts hang XCTest / Swift Testing hosts.
-        if ProcessRuntime.isRunningUnderTests {
-            debugLog("🧪 Skipping alert under tests: \(title) — \(message)")
-            return
-        }
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = title
-            alert.informativeText = message
-            alert.alertStyle = style
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
+    func dismissHUD(animated: Bool = true) {
+        HUDAlertManager.shared.dismiss(animated: animated)
     }
 }

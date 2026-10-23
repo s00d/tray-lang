@@ -34,11 +34,25 @@ enum ConversionAppRouting {
         "net.kovidgoyal.kitty",
         "dev.warp.Warp-Stable",
         "com.github.wez.wezterm",
-        "com.microsoft.VSCode",
         "com.googlecode.iterm2-nightly",
     ]
 
     static func usesTerminalPath(bundleID: String) -> Bool {
         terminalBundleIDs.contains(bundleID)
+    }
+
+    /// Editors whose Cmd+C without a selection copies the current line.
+    static let lineCopyEditorBundleIDs: Set<String> = [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders",
+        "com.todesktop.230313mzl4w4u92", // Cursor
+        "com.exafunction.windsurf",
+        "com.sublimetext.4",
+        "com.sublimetext.3",
+        "dev.zed.Zed",
+    ]
+
+    static func copiesWholeLineWithoutSelection(bundleID: String) -> Bool {
+        lineCopyEditorBundleIDs.contains(bundleID) || bundleID.hasPrefix("com.jetbrains.") || bundleID.hasPrefix("com.google.android.studio")
     }
 }

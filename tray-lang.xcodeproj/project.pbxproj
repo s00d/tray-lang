@@ -29,9 +29,29 @@
 		B866438A2E3C9A820042EE04 /* tray-langUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "tray-langUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B8E1A0012F00000000000001 /* Exceptions for "tray-lang" folder in "tray-lang" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				"Sources/.idea/Sources.iml",
+				"Sources/.idea/encodings.xml",
+				"Sources/.idea/inspectionProfiles/Project_Default.xml",
+				"Sources/.idea/misc.xml",
+				"Sources/.idea/modules.xml",
+				"Sources/.idea/vcs.xml",
+				"Sources/.idea/workspace.xml",
+			);
+			target = B866436F2E3C9A7F0042EE04 /* tray-lang */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B86643722E3C9A7F0042EE04 /* tray-lang */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B8E1A0012F00000000000001 /* Exceptions for "tray-lang" folder in "tray-lang" target */,
+			);
 			path = "tray-lang";
 			sourceTree = "<group>";
 		};
@@ -398,7 +418,7 @@
 				CODE_SIGN_ENTITLEMENTS = "tray-lang/tray_lang.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = WXS9GV3T26;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -412,7 +432,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.50;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "os.s00d.tray-lang.debug";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -431,7 +451,7 @@
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = WXS9GV3T26;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -445,7 +465,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.50;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "os.s00d.tray-lang";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

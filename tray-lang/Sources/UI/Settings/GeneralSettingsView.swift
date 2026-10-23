@@ -2,138 +2,93 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
-    
-    private var isProtectionSettingsVisible: Bool {
-        coordinator.isCmdQBlockerEnabled || coordinator.isCmdWBlockerEnabled
-    }
-    
-    var body: some View {
-        List {
-            Section("Permissions & Status") {
-                SettingsRow(
-                    icon: "lock.shield",
-                    iconColor: coordinator.isAccessibilityGranted ? .green : .red,
-                    title: "Accessibility",
-                    subtitle: coordinator.isAccessibilityGranted ? "Granted" : "Required"
-                ) {
-                    Button(coordinator.isAccessibilityGranted ? "Granted" : "Grant...") {
-                        Task {
-                            await coordinator.accessibilityManager.requestPermissions()
-                        }
-                    }
-                    .disabled(coordinator.isAccessibilityGranted)
-                }
-                
-                if coordinator.isSecureInputActive {
-                    SettingsRow(
-                        icon: "exclamationmark.shield",
-                        iconColor: .yellow,
-                        title: "Secure Input Active",
-                        subtitle: coordinator.secureInputStatusMessage
-                    ) {
-                        Button("Recheck") {
-                            coordinator.recheckSecureInput()
-                        }
-                    }
-                }
-                
-                HStack(spacing: 16) {
-                    StatusIndicator(
-                        isActive: coordinator.isTextConversionEnabled && coordinator.isAccessibilityGranted,
-                        icon: "keyboard",
-                        color: .green,
-                        tooltip: "Hotkey Active"
-                    )
-                    
-                    StatusIndicator(
-                        isActive: isProtectionSettingsVisible && coordinator.isAccessibilityGranted,
-                        icon: "shield",
-                        color: .orange,
-                        tooltip: "Protection Active"
-                    )
-                    
-                    StatusIndicator(
-                        isActive: coordinator.isSmartLayoutEnabled,
-                        icon: "brain.head.profile",
-                        color: .cyan,
-                        tooltip: "Smart Layout Enabled"
-                    )
-                }
-                .padding(.vertical, 8)
-            }
-            
-            Section("Spell Check") {
-                SettingsRow(
-                    icon: "text.badge.checkmark",
-                    iconColor: .green,
-                    title: "Fix Spelling",
-                    subtitle: "Enable spell check · \(coordinator.spellCheckHotKeyDisplay)"
-                ) {
-                    Toggle("", isOn: $coordinator.isSpellCheckEnabled)
-                }
-            }
-            
-            Section("Behavior") {
-                SettingsRow(icon: "arrow.up.circle", iconColor: .purple, title: "Auto Launch", subtitle: "Launch Tray Lang on system login") {
-                    Toggle("", isOn: $coordinator.isAutoLaunchEnabled)
-                }
-            }
-            
-            Section("Smart Switcher") {
-                SettingsRow(icon: "brain.head.profile", iconColor: .cyan, title: "Smart Layout", subtitle: "Remember layout for each application") {
-                    Toggle("", isOn: $coordinator.isSmartLayoutEnabled)
-                }
-            }
-            
-            Section("Conversion") {
-                SettingsRow(
-                    icon: "textformat.abc",
-                    iconColor: .orange,
-                    title: "Text Conversion",
-                    subtitle: "Enable conversion · \(coordinator.layoutHotKeyDisplay)"
-                ) {
-                    Toggle("", isOn: $coordinator.isTextConversionEnabled)
-                }
-            }
-            
-            Section("Accidental Press Protection") {
-                SettingsRow(icon: "q.circle", iconColor: .red, title: "Block Cmd+Q", subtitle: "Prevent accidental app quits") {
-                    Toggle("", isOn: $coordinator.isCmdQBlockerEnabled)
-                }
-                
-                SettingsRow(icon: "w.circle", iconColor: .orange, title: "Block Cmd+W", subtitle: "Prevent accidental window closes") {
-                    Toggle("", isOn: $coordinator.isCmdWBlockerEnabled)
-                }
-            }
-            
-            Section("Protection Settings") {
-                SettingsRow(icon: "timer", iconColor: .gray, title: "Hold Delay", subtitle: "Time to hold keys before triggering") {
-                    Stepper("\(coordinator.blockerDelay) sec", value: $coordinator.blockerDelay, in: 1...5)
-                }
-                .disabled(!isProtectionSettingsVisible)
-            }
-        }
-        .listStyle(.inset(alternatesRowBackgrounds: true))
-    }
-}
 
-// MARK: - Status Indicator
-struct StatusIndicator: View {
-    let isActive: Bool
-    let icon: String
-    let color: Color
-    let tooltip: String
-    
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(isActive ? color : .gray)
-            
-            Circle()
-                .fill(isActive ? color : .gray.opacity(0.3))
-                .frame(width: 8, height: 8)
+        Form {
+            if !coordinator.isAccessibilityGranted {
+                Section {
+                    LabeledContent {
+                        Button("Grant Access…") {
+                            Task { await coordinator.accessibilityManager.requestPermissions(openSettings: true) }
+                        }
+                    } label: {
+                        Label("Accessibility access is required", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Needed to read and replace selected text, fix words while typing and block ⌘Q / ⌘W.")
+                    }
+                }
+            }
+
+            if coordinator.isSecureInputActive {
+                Section {
+                    LabeledContent {
+                        Button("Check Again") { coordinator.recheckSecureInput() }
+                    } label: {
+                        Label("Secure Input is on", systemImage: "lock.shield")
+                            .foregroundStyle(.yellow)
+                        Text(coordinator.secureInputStatusMessage)
+                    }
+                }
+            }
+
+            Section("Selected Text") {
+                Toggle(isOn: $coordinator.isTextConversionEnabled) {
+                    Text("Convert keyboard layout")
+                    Text("Fixes text typed in the wrong layout, e.g. ghbdtn → привет.")
+                }
+                LabeledContent("Shortcut") {
+                    HotKeyRecorder(hotKey: $coordinator.layoutHotKey, onRecordingChange: recordingChanged)
+                }
+                .disabled(!coordinator.isTextConversionEnabled)
+
+                Toggle(isOn: $coordinator.isSpellCheckEnabled) {
+                    Text("Fix spelling")
+                    Text("Replaces misspelled words with the macOS spell checker's correction.")
+                }
+                .disabled(!coordinator.isTextConversionEnabled)
+                LabeledContent("Shortcut") {
+                    HotKeyRecorder(hotKey: $coordinator.spellCheckHotKey, onRecordingChange: recordingChanged)
+                }
+                .disabled(!coordinator.isTextConversionEnabled || !coordinator.isSpellCheckEnabled)
+            }
+
+            Section {
+                Toggle(isOn: $coordinator.isAutoConvertEnabled) {
+                    Text("Fix words while typing")
+                    Text("When you press Space after a word that only makes sense in the other layout, it is retyped and the layout switches. Press Delete right away to undo.")
+                }
+                Toggle("Play a sound", isOn: $coordinator.isAutoConvertSoundEnabled)
+                    .disabled(!coordinator.isAutoConvertEnabled)
+                Toggle("Skip terminals and code editors", isOn: $coordinator.isAutoConvertSkippingCodeApps)
+                    .disabled(!coordinator.isAutoConvertEnabled)
+            } header: {
+                Text("While Typing")
+            } footer: {
+                Text("Checks only the word you just finished, against the macOS dictionaries. Nothing is stored or sent anywhere.")
+            }
+
+            Section("Startup") {
+                Toggle("Launch at login", isOn: $coordinator.isAutoLaunchEnabled)
+                if let error = coordinator.autoLaunchError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            if coordinator.isAccessibilityGranted {
+                Section {
+                    LabeledContent("Accessibility") {
+                        Label("Granted", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
         }
-        .help(tooltip)
+        .formStyle(.grouped)
+    }
+
+    private func recordingChanged(_ isRecording: Bool) {
+        isRecording ? coordinator.stopKeyCapture() : coordinator.startKeyCapture()
     }
 }

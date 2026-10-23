@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Carbon
+import IOKit
 
 struct SecureInputStatus: Equatable {
     var isActive: Bool
@@ -18,82 +19,35 @@ enum SecureInputInspector {
         kill(pid, 0) == 0
     }
 
-    static func parseHolderPID(from ioregOutput: String) -> pid_t? {
-        let pattern = #""?kCGSSessionSecureInputPID"?\s*=\s*(\d+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+    static let holderKey = "kCGSSessionSecureInputPID"
 
-        let range = NSRange(ioregOutput.startIndex..<ioregOutput.endIndex, in: ioregOutput)
-        guard let match = regex.firstMatch(in: ioregOutput, range: range),
-              let pidRange = Range(match.range(at: 1), in: ioregOutput),
-              let pid = Int32(ioregOutput[pidRange]),
-              pid > 0 else {
-            return nil
-        }
-
-        return pid_t(pid)
+    /// PID from a session dictionary (`CGSessionCopyCurrentDictionary` or an `IOConsoleUsers` entry).
+    static func holderPID(in session: [String: Any]) -> pid_t? {
+        guard let value = session[holderKey] as? NSNumber, value.int32Value > 0 else { return nil }
+        return pid_t(value.int32Value)
     }
 
+    /// Same data `ioreg` prints, read in-process: no shell, no IORegistry dump.
     static func holderPID() -> pid_t? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [
-            "-c",
-            #"ioreg -l -w 0 | grep -m1 -o '"kCGSSessionSecureInputPID"=[0-9]*' | grep -o '[0-9]*'"#
-        ]
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return nil
+        if let session = CGSessionCopyCurrentDictionary() as? [String: Any], let pid = holderPID(in: session) {
+            return pid
         }
-
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let raw = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            let pid = Int32(raw),
-            pid > 0 else {
-            return nil
-        }
-
-        return pid_t(pid)
+        let root = IORegistryGetRootEntry(kIOMainPortDefault)
+        defer { IOObjectRelease(root) }
+        guard let users = IORegistryEntryCreateCFProperty(root, "IOConsoleUsers" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? [[String: Any]] else { return nil }
+        return users.lazy.compactMap(holderPID(in:)).first
     }
 
     static func processName(for pid: pid_t?) -> String? {
         guard let pid, pid > 0 else { return nil }
-
-        if let app = NSRunningApplication(processIdentifier: pid) {
-            if let name = app.localizedName, !name.isEmpty {
-                return name
-            }
-            if let bundleID = app.bundleIdentifier, !bundleID.isEmpty {
-                return bundleID
-            }
+        if let app = NSRunningApplication(processIdentifier: pid),
+           let name = app.localizedName ?? app.bundleIdentifier, !name.isEmpty {
+            return name
         }
-
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-p", String(pid), "-o", "command="]
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return "PID \(pid)"
-        }
-
-        process.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let name = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return name?.isEmpty == false ? name : "PID \(pid)"
+        var buffer = [CChar](repeating: 0, count: 256)
+        let length = proc_name(pid, &buffer, UInt32(buffer.count))
+        return length > 0 ? String(cString: buffer) : "PID \(pid)"
     }
 
     static func resolveActiveHolder() -> SecureInputStatus {
@@ -195,14 +149,14 @@ final class SecureInputMonitor {
 
         if next.isActive {
             if next.isStaleHolder {
-                debugLog("⚠️ Secure Input завис: PID \(next.holderPID.map(String.init) ?? "?") уже не существует")
+                debugLog("⚠️ Secure Input stuck: PID \(next.holderPID.map(String.init) ?? "?") has exited")
             } else {
                 let holder = next.holderProcessName ?? "unknown process"
                 let pidText = next.holderPID.map(String.init) ?? "?"
-                debugLog("⚠️ Secure Input активен (\(holder), pid: \(pidText))")
+                debugLog("⚠️ Secure Input on (\(holder), pid: \(pidText))")
             }
         } else {
-            debugLog("✅ Secure Input деактивирован")
+            debugLog("✅ Secure Input off")
         }
     }
 

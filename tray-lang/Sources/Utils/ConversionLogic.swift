@@ -10,7 +10,7 @@ enum ClipboardConversionTiming {
     static let pasteboardChangeTimeout: TimeInterval = 0.25
 
     /// Delay before restoring original clipboard after paste.
-    static let clipboardRestoreDelay: TimeInterval = 0.2
+    static let clipboardRestoreDelay: TimeInterval = 0.3
 
     /// Worst-case wall time for mode-3 waits when modifiers are already released
     /// (pasteboard timeout + restore delay). Does not include user still holding the hotkey.
@@ -30,6 +30,11 @@ enum ClipboardMarkerLogic {
             return nil
         }
         return pasteboardString
+    }
+
+    /// Editors like VS Code copy the whole current line (with its newline) when nothing is selected.
+    static func looksLikeWholeLineCopy(_ text: String) -> Bool {
+        text.hasSuffix("\n") && !text.dropLast().contains("\n")
     }
 
     /// Whether restore should be skipped because something else changed the pasteboard.
