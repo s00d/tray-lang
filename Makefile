@@ -1,7 +1,7 @@
 # Makefile for Tray Lang Development
 # Provides convenient commands for common development tasks
 
-.PHONY: help build test test-ui clean install-deps build-universal create-dmg release
+.PHONY: help build test test-ui clean build-universal create-dmg install release
 
 # Default target
 help:
@@ -12,10 +12,10 @@ help:
 	@echo "  make test               - Run unit tests (log: build/test.log)"
 	@echo "  make test-ui            - Run UI tests (launches the app)"
 	@echo "  make clean              - Clean build artifacts"
-	@echo "  make install-deps       - Install development dependencies"
-	@echo "  make build-universal    - Build universal binary (Intel + Apple Silicon)"
-	@echo "  make create-dmg         - Create DMG installer"
-	@echo "  make release            - Complete release process"
+	@echo "  make build-universal    - Universal Release build, Developer ID signed"
+	@echo "  make create-dmg         - DMG from the universal build (not notarized)"
+	@echo "  make install            - Replace /Applications copy with a fresh build and restart"
+	@echo "  make release            - How to publish a release (GitHub workflow)"
 	@echo "  make lint               - Run SwiftLint"
 	@echo "  make format             - Format code with SwiftLint"
 	@echo ""
@@ -76,43 +76,40 @@ clean:
 	rm -rf build/
 	rm -rf DerivedData/
 
-# Install dependencies
-install-deps:
-	./scripts/install-dependencies.sh
+# Universal (Apple Silicon + Intel) Release build signed with the local Developer ID certificate.
+# Notarization and the GitHub release are done by the "Release" workflow.
+UNIVERSAL_APP = build/universal/Build/Products/Release/tray-lang.app
+TEAM ?= R6VC7JTLE8
 
-# Build universal binary
 build-universal:
-	./scripts/build-universal.sh
+	@mkdir -p build
+	xcodebuild build -project tray-lang.xcodeproj -scheme tray-lang -configuration Release \
+		-destination 'generic/platform=macOS' -derivedDataPath build/universal \
+		ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=$(TEAM) PROVISIONING_PROFILE_SPECIFIER= \
+		OTHER_CODE_SIGN_FLAGS=--timestamp > build/universal.log 2>&1 || { grep error: build/universal.log; exit 1; }
+	@lipo -archs $(UNIVERSAL_APP)/Contents/MacOS/tray-lang
+	@codesign --verify --strict $(UNIVERSAL_APP) && echo "Built and signed: $(UNIVERSAL_APP)"
 
-# Create DMG
-create-dmg:
-	@if [ ! -f "build/Release/tray-lang-universal.app" ]; then \
-		echo "Universal app not found. Building first..."; \
-		$(MAKE) build-universal; \
-	fi
-	@if ! command -v create-dmg &> /dev/null; then \
-		echo "Installing create-dmg..."; \
-		brew install create-dmg; \
-	fi
-	create-dmg \
-		--volname "Tray Lang" \
-		--window-pos 200 120 \
-		--window-size 600 300 \
-		--icon-size 100 \
-		--icon "tray-lang-universal.app" 175 120 \
-		--hide-extension "tray-lang-universal.app" \
-		--app-drop-link 425 120 \
-		"build/Release/Tray-Lang-Universal.dmg" \
-		"build/Release/"
+create-dmg: build-universal
+	@rm -rf build/dmg && mkdir -p build/dmg
+	ditto $(UNIVERSAL_APP) build/dmg/tray-lang-universal.app
+	cp README.md build/dmg/
+	ln -s /Applications build/dmg/Applications
+	hdiutil create -volname "Tray Lang" -srcfolder build/dmg -ov -format UDZO build/Tray-Lang-Universal.dmg
+	@rm -rf build/dmg
 
-# Release process
+# Replace the copy in /Applications with a fresh universal build and restart it.
+install: build-universal
+	-osascript -e 'tell application id "os.s00d.tray-lang" to quit'
+	@sleep 1
+	rm -rf /Applications/tray-lang-universal.app
+	ditto $(UNIVERSAL_APP) /Applications/tray-lang-universal.app
+	open /Applications/tray-lang-universal.app
+
 release:
-	@echo "Starting release process..."
-	$(MAKE) clean
-	$(MAKE) test
-	$(MAKE) build-universal
-	$(MAKE) create-dmg
-	@echo "Release artifacts created in build/Release/"
+	@echo "Bump MARKETING_VERSION, push, then run the Release workflow:"
+	@echo "  gh workflow run build.yml --ref main"
 
 # Code quality
 lint:
@@ -134,19 +131,6 @@ open-project:
 	open tray-lang.xcodeproj
 
 run:
-	$(MAKE) build
-	open build/Debug/tray-lang.app
-
-# Git helpers
-git-setup:
-	git config core.hooksPath .git/hooks
-	pre-commit install
-
-# Documentation
-docs:
-	@echo "Generating documentation..."
-	@echo "Documentation files:"
-	@echo "  - README.md"
-	@echo "  - CONTRIBUTING.md"
-	@echo "  - CHANGELOG.md"
-	@echo "  - LICENSE" 
+	xcodebuild build -project tray-lang.xcodeproj -scheme tray-lang -configuration Debug -derivedDataPath build/debug \
+		CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= > build/debug.log 2>&1 || { grep error: build/debug.log; exit 1; }
+	open build/debug/Build/Products/Debug/tray-lang.app --args -openSettings

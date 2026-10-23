@@ -1,178 +1,167 @@
-name: Build Universal macOS App
+name: Release
 
+# Run from the Actions tab once MARKETING_VERSION is bumped and pushed.
+# Tests → universal Developer ID build → notarized + stapled app and DMG → GitHub release vX.Y.
 on:
   workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the release as a draft
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
-env:
-  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-  DERIVED_DATA_INTEL: ${{ github.workspace }}/build/DerivedData-intel
-  DERIVED_DATA_ARM64: ${{ github.workspace }}/build/DerivedData-arm64
-  APP_OUTPUT_DIR: ${{ github.workspace }}/build/Release
-  UNSIGNED_INTEL_APP: ${{ github.workspace }}/build/Release/tray-lang-intel.app
-  UNSIGNED_ARM64_APP: ${{ github.workspace }}/build/Release/tray-lang-arm64.app
-  UNIVERSAL_APP: ${{ github.workspace }}/build/Release/tray-lang-universal.app
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  build:
+  test:
     runs-on: macos-15
-
+    timeout-minutes: 30
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-    - name: Set up Xcode
-      uses: maxim-lobanov/setup-xcode@v1
-      with:
-        xcode-version: latest-stable
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
-    - name: Get version from project
-      run: |
-        VERSION=$(xcodebuild -project tray-lang.xcodeproj -showBuildSettings -configuration Release | awk -F' = ' '/MARKETING_VERSION/{print $2; exit}')
-        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-        echo "Building version: $VERSION"
+      - name: Unit tests
+        run: make test
 
-    - name: Install signing certificate
-      env:
-        BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-        P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-        KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      run: |
-        CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
-        KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-log
+          path: build/test.log
 
-        echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
-        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-        security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-        security list-keychain -d user -s "$KEYCHAIN_PATH"
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-        security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+  release:
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEYCHAIN_PATH: ${{ runner.temp }}/app-signing.keychain-db
+      DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
+      OUT: ${{ github.workspace }}/build/Release
+    steps:
+      - uses: actions/checkout@v7
 
-    - name: Clean and prepare
-      run: |
-        rm -rf build
-        mkdir -p "$APP_OUTPUT_DIR"
-        xcodebuild clean -project tray-lang.xcodeproj -scheme tray-lang -configuration Release
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
-    - name: Build for Intel
-      run: |
-        xcodebuild \
-          -project tray-lang.xcodeproj \
-          -scheme tray-lang \
-          -configuration Release \
-          -destination 'platform=macOS,arch=x86_64' \
-          -derivedDataPath "$DERIVED_DATA_INTEL" \
-          build \
-          CODE_SIGNING_ALLOWED=NO
+      - name: Read version
+        run: |
+          VERSION=$(xcodebuild -project tray-lang.xcodeproj -scheme tray-lang -configuration Release -showBuildSettings \
+            | awk -F' = ' '/ MARKETING_VERSION /{print $2; exit}')
+          [ -n "$VERSION" ] || { echo "::error::MARKETING_VERSION not found"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists. Bump MARKETING_VERSION first."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "DMG=$OUT/Tray-Lang-v$VERSION-Universal.dmg" >> "$GITHUB_ENV"
+          echo "APP=$OUT/tray-lang-universal.app" >> "$GITHUB_ENV"
 
-        cp -R "$DERIVED_DATA_INTEL/Build/Products/Release/tray-lang.app" "$UNSIGNED_INTEL_APP"
+      - name: Install signing certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          rm -f "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -q "Developer ID Application" \
+            || { echo "::error::Developer ID Application identity missing"; exit 1; }
 
-    - name: Build for Apple Silicon
-      run: |
-        xcodebuild \
-          -project tray-lang.xcodeproj \
-          -scheme tray-lang \
-          -configuration Release \
-          -destination 'platform=macOS,arch=arm64' \
-          -derivedDataPath "$DERIVED_DATA_ARM64" \
-          build \
-          CODE_SIGNING_ALLOWED=NO
+      # One universal build, signed by Xcode with the project's entitlements and hardened runtime.
+      - name: Build universal app
+        run: |
+          xcodebuild build \
+            -project tray-lang.xcodeproj \
+            -scheme tray-lang \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --keychain $KEYCHAIN_PATH"
 
-        cp -R "$DERIVED_DATA_ARM64/Build/Products/Release/tray-lang.app" "$UNSIGNED_ARM64_APP"
+          mkdir -p "$OUT"
+          ditto "$DERIVED_DATA/Build/Products/Release/tray-lang.app" "$APP"
 
-    - name: Create universal app
-      run: |
-        lipo -create \
-          "$UNSIGNED_INTEL_APP/Contents/MacOS/tray-lang" \
-          "$UNSIGNED_ARM64_APP/Contents/MacOS/tray-lang" \
-          -output "$APP_OUTPUT_DIR/tray-lang-universal-binary"
+          ARCHS_BUILT=$(lipo -archs "$APP/Contents/MacOS/tray-lang")
+          echo "Architectures: $ARCHS_BUILT"
+          [[ "$ARCHS_BUILT" == *x86_64* && "$ARCHS_BUILT" == *arm64* ]] || { echo "::error::Not universal"; exit 1; }
+          [ "$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)" = "$VERSION" ] || { echo "::error::Version mismatch"; exit 1; }
 
-        cp -R "$UNSIGNED_INTEL_APP" "$UNIVERSAL_APP"
-        cp "$APP_OUTPUT_DIR/tray-lang-universal-binary" "$UNIVERSAL_APP/Contents/MacOS/tray-lang"
-        chmod +x "$UNIVERSAL_APP/Contents/MacOS/tray-lang"
-        rm -f "$APP_OUTPUT_DIR/tray-lang-universal-binary"
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -dvv "$APP" 2>&1 | grep -E "Authority=Developer ID Application|Timestamp=|flags=.*runtime"
 
-    - name: Sign app
-      run: |
-        SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | awk -F'"' '/Developer ID Application/{print $2; exit}')
-        if [ -z "$SIGNING_IDENTITY" ]; then
-          echo "Developer ID Application identity not found in CI keychain"
-          exit 1
-        fi
+      - name: Notarize and staple app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          ZIP="$RUNNER_TEMP/tray-lang-notarize.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          ./.github/notarize.sh "$ZIP"
+          xcrun stapler staple "$APP"
+          spctl -a -vv --type execute "$APP"
 
-        codesign --force --deep --options runtime \
-          --entitlements tray-lang/tray_lang.entitlements \
-          --sign "$SIGNING_IDENTITY" \
-          "$UNIVERSAL_APP"
+      - name: Build, sign and notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          STAGING="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGING"
+          ditto "$APP" "$STAGING/tray-lang-universal.app"
+          cp README.md "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "Tray Lang v$VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
 
-        codesign --verify --deep --strict --verbose=2 "$UNIVERSAL_APP"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/{print $2; exit}')
+          codesign --sign "$IDENTITY" --timestamp --keychain "$KEYCHAIN_PATH" "$DMG"
+          ./.github/notarize.sh "$DMG"
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl -a -vv --type open --context context:primary-signature "$DMG"
 
-    - name: Notarize app
-      env:
-        APPLE_ID: ${{ secrets.APPLE_ID }}
-        APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      run: |
-        ditto -c -k --keepParent "$UNIVERSAL_APP" "$APP_OUTPUT_DIR/tray-lang-notarize.zip"
+          (cd "$OUT" && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
+          cat "$DMG.sha256"
 
-        xcrun notarytool submit "$APP_OUTPUT_DIR/tray-lang-notarize.zip" \
-          --apple-id "$APPLE_ID" \
-          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-          --team-id "$APPLE_TEAM_ID" \
-          --wait
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Tray Lang v${{ env.VERSION }}
+          draft: ${{ inputs.draft }}
+          make_latest: true
+          generate_release_notes: true
+          body: |
+            Signed and notarized universal build (Apple Silicon + Intel), macOS 15 or later.
 
-        xcrun stapler staple "$UNIVERSAL_APP"
-        spctl -a -vv --type execute "$UNIVERSAL_APP"
+            **Install:** open the DMG, drag Tray Lang to Applications, launch it and allow Accessibility access when asked.
+          files: |
+            ${{ env.DMG }}
+            ${{ env.DMG }}.sha256
 
-    - name: Create DMG
-      run: |
-        rm -rf "$UNSIGNED_INTEL_APP" "$UNSIGNED_ARM64_APP"
-
-        DMG_STAGING="$APP_OUTPUT_DIR/dmg-staging"
-        DMG_PATH="$APP_OUTPUT_DIR/Tray-Lang-v$VERSION-Universal.dmg"
-
-        rm -rf "$DMG_STAGING" "$DMG_PATH"
-        mkdir -p "$DMG_STAGING"
-        cp -R "$UNIVERSAL_APP" "$DMG_STAGING/"
-        cp README.md "$DMG_STAGING/"
-        ln -s /Applications "$DMG_STAGING/Applications"
-
-        hdiutil create \
-          -volname "Tray Lang v$VERSION" \
-          -srcfolder "$DMG_STAGING" \
-          -ov \
-          -format UDZO \
-          "$DMG_PATH"
-
-        rm -rf "$DMG_STAGING"
-        ls -la "$APP_OUTPUT_DIR"
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v3
-      with:
-        tag_name: v${{ env.VERSION }}
-        name: Tray Lang v${{ env.VERSION }}
-        body: |
-          ## Tray Lang v${{ env.VERSION }}
-
-          Signed and notarized universal build.
-
-          ### Installation
-          1. Download and mount the DMG
-          2. Move the app to Applications folder
-          3. Grant accessibility permissions on first launch
-
-          ### Files Included
-          - `tray-lang-universal.app` - Universal macOS application
-          - `README.md` - Installation and usage instructions
-
-          ### System Requirements
-          - macOS 15.0 or higher
-          - Intel or Apple Silicon Mac
-        files: |
-          build/Release/Tray-Lang-v${{ env.VERSION }}-Universal.dmg
-        draft: false
-        prerelease: false
+      - name: Remove signing keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true

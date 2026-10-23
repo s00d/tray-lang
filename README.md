@@ -58,12 +58,20 @@ A powerful macOS application that transforms text between keyboard layouts, prev
 
 ## Installation
 
-### From Source
+Download the DMG from [Releases](https://github.com/s00d/tray-lang/releases), drag Tray Lang to Applications, launch it and allow Accessibility access.
+
+From source (needs a Developer ID certificate to keep the Accessibility permission between builds):
+
 ```bash
-git clone <repository>
-cd tray-lang
-make build
+make install
 ```
+
+builds a signed universal app, replaces the copy in /Applications and restarts it.
+
+## Releasing
+
+1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` (app target) and push.
+2. Run the **Release** workflow (`gh workflow run build.yml --ref main`). It runs the tests, builds a universal Developer ID app, notarizes and staples the app and the DMG, and publishes release `vX.Y` with generated notes and a SHA-256 checksum. It refuses to run if the tag already exists.
 
 ## Troubleshooting
 

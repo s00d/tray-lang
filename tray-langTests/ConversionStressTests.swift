@@ -133,7 +133,8 @@ struct SupportingBehaviourTests {
         #expect(SpellCheckManager.language(for: "привт", available: ["en"]) == nil)
     }
 
-    @Test func spellingFixesRussianAndEnglish() {
+    @Test(.enabled(if: Dictionaries.russianAndEnglish, "needs the Russian and English system dictionaries"))
+    func spellingFixesRussianAndEnglish() {
         let checker = SpellCheckManager()
         #expect(checker.fixText("привт как дила") == "привет как дела")
         #expect(checker.fixText("I recieve the wrold") == "I receive the world")

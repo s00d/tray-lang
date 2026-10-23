@@ -5,6 +5,7 @@ import Testing
 /// Auto-convert while typing: decisions are made by a pure engine fed with key events,
 /// so every case runs without touching the real keyboard.
 @MainActor
+@Suite(.enabled(if: Dictionaries.russianAndEnglish, "needs the Russian and English system dictionaries"))
 struct AutoConvertTests {
     /// Real dictionaries for the two languages involved.
     private let validator = SpellCheckWordValidator()
@@ -173,7 +174,10 @@ struct AutoConvertTests {
         #expect(perKey < .microseconds(200), "per key: \(perKey)")
     }
 
-    // MARK: Routing and output
+}
+
+/// Parts of auto-convert that need no dictionaries.
+struct AutoConvertOutputTests {
 
     @Test func codeEditorsAndTerminalsAreSkippedByDefault() {
         #expect(AutoConvertManager.isSkippedByDefault(bundleID: "com.apple.Terminal"))
