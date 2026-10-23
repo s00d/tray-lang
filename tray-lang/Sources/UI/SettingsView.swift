@@ -32,18 +32,20 @@ struct SettingsView: View {
     @State private var selection: SettingsPane = .general
 
     var body: some View {
-        NavigationSplitView {
+        // Fixed-width sidebar: a split view restores whatever column width was saved last time.
+        HStack(spacing: 0) {
             List(SettingsPane.allCases, selection: $selection) { pane in
                 Label(pane.title, systemImage: pane.systemImage)
                     .tag(pane)
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 240)
-            .toolbar(removing: .sidebarToggle)
-        } detail: {
+            .listStyle(.sidebar)
+            .frame(width: 200)
+            Divider()
             detail
-                .navigationTitle(selection.title)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 680, minHeight: 460)
+        .navigationTitle(selection.title)
+        .frame(minWidth: 720, minHeight: 480)
     }
 
     @ViewBuilder

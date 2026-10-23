@@ -279,14 +279,13 @@ final class WindowManager: NSObject, NSMenuDelegate, NSWindowDelegate {
         guard let coordinator else { return }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 540),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: true
         )
         window.title = "\(AppIdentity.displayName) Settings"
         window.identifier = NSUserInterfaceItemIdentifier("tray-lang.settings")
         window.isReleasedWhenClosed = false
-        window.toolbarStyle = .unified
         window.delegate = self
         window.contentViewController = NSHostingController(rootView: SettingsView(coordinator: coordinator))
         window.setContentSize(NSSize(width: 760, height: 540))

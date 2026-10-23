@@ -1,113 +1,126 @@
-[![Platform](https://img.shields.io/badge/platform-macOS-blue?style=for-the-badge)](https://github.com/s00d/tray-lang)
-[![License](https://img.shields.io/badge/license-All%20Rights%20Reserved-red?style=for-the-badge)](https://github.com/s00d/tray-lang)
-[![GitHub release](https://img.shields.io/github/v/release/s00d/tray-lang?style=for-the-badge)](https://github.com/s00d/tray-lang/releases)
-[![GitHub downloads](https://img.shields.io/github/downloads/s00d/tray-lang/total?style=for-the-badge)](https://github.com/s00d/tray-lang/releases)
-[![GitHub issues](https://img.shields.io/badge/github-issues-orange?style=for-the-badge)](https://github.com/s00d/tray-lang/issues)
-[![GitHub stars](https://img.shields.io/badge/github-stars-yellow?style=for-the-badge)](https://github.com/s00d/tray-lang/stargazers)
-[![Donate](https://img.shields.io/badge/Donate-Donationalerts-ff4081?style=for-the-badge)](https://www.donationalerts.com/r/s00d88)
+<p align="center">
+  <img src="assets/banner.jpg" alt="Tray Lang — typed in the wrong layout? One key fixes it." width="100%">
+</p>
 
-<div align="center">
-  <img src="assets/logo_small-min.png" alt="Tray Lang Logo" width="200">
-</div>
+<p align="center">
+  <a href="https://github.com/s00d/tray-lang/releases/latest"><img src="https://img.shields.io/github/v/release/s00d/tray-lang?style=flat-square&label=release" alt="Latest release"></a>
+  <a href="https://github.com/s00d/tray-lang/releases"><img src="https://img.shields.io/github/downloads/s00d/tray-lang/total?style=flat-square" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-blue?style=flat-square" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/Apple%20Silicon%20%2B%20Intel-universal-lightgrey?style=flat-square" alt="Universal">
+  <a href="https://www.donationalerts.com/r/s00d88"><img src="https://img.shields.io/badge/donate-DonationAlerts-ff4081?style=flat-square" alt="Donate"></a>
+</p>
 
-# Tray Lang
+<p align="center">
+  <b>A tiny menu bar app that fixes text typed in the wrong keyboard layout.</b><br>
+  Select <code>ghbdtn</code>, press <kbd>⌘</kbd> <kbd>1</kbd>, get <code>привет</code>. Press again to undo.
+</p>
 
-A powerful macOS application that transforms text between keyboard layouts, prevents accidental app quits, and intelligently manages keyboard layouts per application.
+<p align="center">
+  <a href="https://github.com/s00d/tray-lang/releases/latest"><b>⬇ Download for macOS</b></a>
+</p>
 
-![Tray Lang App 1](assets/app1.png)
-![Tray Lang App 2](assets/app2.png)
-![Tray Lang App 3](assets/app3.png)
+---
 
-## What it does
+## Features
 
-**Text Transformation**: Select text typed in the wrong layout, press a hotkey, and it is retyped as if the right layout had been on — `ghbdtn` → `привет`, `руддщ` → `hello`, and mixed text like `фыва ghjjk` → `asdf проол` in one go. Press again to undo. The keyboard layout switches to match.
+<img src="assets/menu.png" alt="Menu bar menu" width="300" align="right">
 
-**Fix While Typing** (off by default): when you press Space after a word that only makes sense in the other layout — `ghbdtn` → `привет`, `руддщ` → `hello` — it is retyped and the layout switches, with a barely audible 75 ms tone. Press Delete right away to undo; that word is then left alone.
+**Convert the selection** — select text in any app and press the hotkey. Every word flips to the other layout, so mixed text works too: `фыва ghjjk` → `asdf проол`. The keyboard layout switches to match what you are about to type.
 
-**Smart Layout Switching**: Remembers the layout you used in each app and restores it, with optional fixed rules per app.
+**Fix while typing** *(off by default)* — when you press <kbd>Space</kbd> after a word that only makes sense in the other layout, it is retyped and the layout switches, with a barely audible tone. <kbd>Delete</kbd> right after undoes it, and that word is left alone from then on.
 
-**Quit Protection**: A quick ⌘Q / ⌘W shows a reminder; hold it for 1–5 seconds to actually quit or close.
+**Exact for your keyboard** — key tables are read from macOS itself, so punctuation lands right on Russian *and* Russian – PC, Ukrainian, Belarusian, Greek, Hebrew, Arabic, German, French, Nordic, Dvorak, Colemak and any other installed layout.
 
-## Quick Start
+**Layout per app** — every app gets back the layout you last used in it, or a fixed one you choose.
 
-1. Build from source (`make build`) or download a release
-2. Allow Accessibility access when asked
-3. Select text → press **⌘1** (change it in Settings › General)
+**Hold ⌘Q / ⌘W** — a quick press shows a reminder instead of quitting the app or closing the window. Hold to confirm.
 
-## How conversion works
+**Input menu replacement** — switch input sources right from the Tray Lang menu and hide the system one.
 
-- **Key tables come from macOS.** Every profile is a pair of keyboard layouts installed on your Mac; the app asks macOS (`UCKeyTranslate`) what each key types on each layout. Nothing is hard-coded, so Russian (Mac) and Russian – PC, Ukrainian, Belarusian, Greek, Hebrew, Arabic, German, French, Nordic, Dvorak, Colemak… are all exact, including dead keys.
-- **Auto profile** (default) pairs your latin layout with the first other layout enabled in System Settings › Keyboard › Input Sources. Pick any other installed layout in Settings › Conversion, or make a custom table by duplicating one.
-- **Per word.** Letters always flip to the other layout. Punctuation that exists on both layouts (`.` `,` `;` `"`…) follows the word it is in, so `ghbdtn^` becomes `привет,` on Russian (Mac) and `ghbdtn?` becomes `привет,` on Russian – PC.
-- **Replacing the text** tries Accessibility first and checks that the app really changed the text before falling back to the clipboard, so text is never inserted twice. Copy and paste go through the app's own Edit menu when it has one (works on any layout), with ⌘C/⌘V as the last resort. The clipboard is restored afterwards unless something else wrote to it.
-- **While typing**, only the current word is kept in memory, checked against the macOS dictionaries when you press Space, and only between different scripts (Latin ↔ Cyrillic/Greek/Hebrew…). Digits, `@`, `/`, `_` and terminals/code editors are skipped. The word is retyped with Unicode key events (no clipboard), and the app ignores its own events. While the feature is off no key monitor is installed at all.
-- **Terminals** (Terminal, iTerm2, Warp, kitty, …): the current command line is converted. Editors that copy the whole line without a selection (VS Code, Cursor, JetBrains, Sublime, Zed) are recognised, so nothing is pasted when nothing is selected.
+**Fix spelling** — a second hotkey replaces misspelled words with the macOS correction, picking Russian, Ukrainian or English per word.
+
+<br clear="right">
 
 ## Settings
 
-- **Menu bar**: current layout and warnings; Text (Convert Selection, Fix While Typing, Fix Spelling, Layouts); Apps (Layout per App, Hold ⌘Q / ⌘W); Settings…, About, Quit.
-- **General**: permissions status, hotkeys (click and press a new shortcut), fixing while typing, launch at login.
-- **Conversion**: profile, a live "Try It" field, the key table, custom profiles.
-- **Smart Layout**: on/off, per-app rules, remembered layouts.
-- **Quit Protection**: ⌘Q / ⌘W, hold time, statistics, excluded apps.
+<table>
+  <tr>
+    <td width="50%"><img src="assets/settings-general.png" alt="General settings"></td>
+    <td width="50%"><img src="assets/settings-conversion.png" alt="Conversion settings"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>General</b> — hotkeys, fixing while typing, launch at login</td>
+    <td align="center"><b>Conversion</b> — profile, live preview, the keyboard as macOS types it</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/settings-smart-layout.png" alt="Smart Layout settings"></td>
+    <td width="50%"><img src="assets/settings-protection.png" alt="Quit protection settings"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Smart Layout</b> — per-app rules and remembered layouts</td>
+    <td align="center"><b>Quit Protection</b> — ⌘Q / ⌘W, hold time, excluded apps</td>
+  </tr>
+</table>
 
-## Requirements
+## Install
 
-- macOS 15.0+
-- Accessibility permissions (for text manipulation and hotkey blocking)
+1. Download the DMG from **[Releases](https://github.com/s00d/tray-lang/releases/latest)** — signed and notarized, universal (Apple Silicon + Intel).
+2. Drag **Tray Lang** to Applications and launch it. It lives in the menu bar.
+3. Allow **Accessibility** access when asked (System Settings › Privacy & Security › Accessibility). It is needed to read and replace selected text, watch typing for *Fix while typing*, and hold back ⌘Q / ⌘W.
 
-## Installation
+Requires macOS 15 or later.
 
-Download the DMG from [Releases](https://github.com/s00d/tray-lang/releases), drag Tray Lang to Applications, launch it and allow Accessibility access.
+## How it works
 
-From source (needs a Developer ID certificate to keep the Accessibility permission between builds):
-
-```bash
-make install
-```
-
-builds a signed universal app, replaces the copy in /Applications and restarts it.
-
-## Releasing
-
-1. Run `make test` on your Mac (the tests need a real session: layouts, dictionaries, pasteboard).
-2. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` (app target) and push.
-3. Run the **Release** workflow (`gh workflow run build.yml --ref main`). It builds a universal Developer ID app, notarizes and staples the app and the DMG, and publishes release `vX.Y` with generated notes and a SHA-256 checksum. It refuses to run if the tag already exists.
+- **Profiles are pairs of macOS layouts.** The app asks macOS (`UCKeyTranslate`) what every key types on each layout, including dead keys. **Auto** pairs your latin layout with the first other input source you have enabled and follows changes in System Settings. You can also pick any installed layout, or make a custom table starting from one.
+- **Per word.** Letters always flip to the other side; punctuation that exists on both layouts follows its word. On Russian (Mac) `ghbdtn^` becomes `привет,`; on Russian – PC `ghbdtn?` does.
+- **Replacing text never inserts it twice.** Accessibility is tried first and the result is checked before falling back to the clipboard. Copy and paste go through the app's own Edit menu, synthetic ⌘C / ⌘V only as a last resort, and your clipboard is restored afterwards.
+- **Terminals** (Terminal, iTerm2, Warp, kitty…) convert the current command line. Code editors that copy the whole line without a selection (VS Code, Cursor, JetBrains, Sublime, Zed) are recognised, so nothing happens when nothing is selected.
+- **Light by design.** Idle at 0% CPU and about 15 MB of memory: no polling, no helper processes, no network. *Fix while typing* keeps only the current word in memory and installs its key monitor only while it is on.
 
 ## Troubleshooting
 
-**Nothing happens on the hotkey** — check Settings › General: Accessibility must be granted and "Convert keyboard layout" on. If another app holds Secure Input (password fields, some terminals), macOS blocks reading keys; the settings show which app.
+**The hotkey does nothing.** Open Settings › General: Accessibility must be *Granted* and *Convert keyboard layout* on. If a password field or another app holds Secure Input, macOS blocks keyboard access; the settings show which app.
 
-**Punctuation converts to the wrong sign** — pick the exact layout you type on in Settings › Conversion (for example Russian vs Russian – PC); Auto uses the first non-latin layout you have enabled.
+**Punctuation comes out wrong.** Pick the layout you actually type on in Settings › Conversion (for example Russian vs Russian – PC). Auto uses the first non-latin input source you have enabled.
 
-**Dock icon appears** — only while the Settings window is open, so it can come to the front.
+**A Dock icon appears.** Only while Settings is open, so the window can come to the front.
 
-## Architecture
-
-AppKit status item and windows hosting SwiftUI views (a SwiftUI `MenuBarExtra` + `Settings` scene cannot reliably bring its window to the front from a menu bar app).
-
-- `AppCoordinator` — owns the managers, wires settings to services
-- `SystemKeyboardLayouts` — reads key tables of macOS layouts (`TISInputSource` + `UCKeyTranslate`); TIS calls are kept on the main thread
-- `TextTransformer` — profiles and the per-word conversion
-- `TextProcessingManager` — hotkey flow: read selection → convert → replace → switch layout; talks to the system only through `SelectionDriver`
-- `SystemSelectionDriver` — Accessibility, Edit-menu actions, clipboard, synthetic keys
-- `KeyboardLayoutManager`, `SmartLayoutManager`, `HotKeyManager` (Carbon hotkeys), `HotkeyBlockerManager` (event taps), `SpellCheckManager`
-- `WindowManager` — menu bar menu, main menu, settings window
-
-## Testing
+## Development
 
 ```bash
-make test
+make test      # unit tests, ad-hoc signed; full log in build/test.log
+make run       # debug build, opens Settings
+make install   # signed universal build → /Applications, restarts the app
 ```
 
-Runs the unit tests ad-hoc signed (no developer certificate needed) and writes the full log to `build/test.log`. Under tests the app does not create its menu bar item, uses a throwaway UserDefaults suite and never touches the real clipboard, layouts or Accessibility: the hotkey flow runs against fake apps (`FakeTextApp`) that reproduce native fields, apps that lie about Accessibility writes, stale selections, line-copying editors and terminals. Every key of every built-in layout is checked to convert there and back.
+The tests drive the hotkey flow against fake apps (native fields, apps that lie about Accessibility writes, stale selections, line-copying editors, terminals) and check that every key of every built-in layout converts there and back. They need a real Mac session (input sources, dictionaries, pasteboard), so they run locally rather than in CI.
 
-`make test-ui` launches the real app and needs Accessibility for the test runner.
+<details>
+<summary>Architecture</summary>
+
+AppKit status item and windows hosting SwiftUI views.
+
+- `AppCoordinator` — owns the managers and wires settings to services
+- `SystemKeyboardLayouts` — key tables of macOS layouts (`TISInputSource` + `UCKeyTranslate`), main-thread TIS access
+- `TextTransformer` — profiles and per-word conversion
+- `TextProcessingManager` — hotkey flow: read selection → convert → replace → switch layout, through `SelectionDriver`
+- `SystemSelectionDriver` — Accessibility, Edit-menu actions, clipboard, synthetic keys
+- `AutoConvertManager` — fixing while typing (engine + key monitor)
+- `KeyboardLayoutManager`, `SmartLayoutManager`, `HotKeyManager` (Carbon hotkeys), `HotkeyBlockerManager` (event tap), `SpellCheckManager`
+- `WindowManager` — menu bar menu, main menu, settings window
+
+</details>
+
+<details>
+<summary>Releasing</summary>
+
+1. Run `make test` locally.
+2. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` (app target) and push.
+3. Run the **Release** workflow: `gh workflow run build.yml --ref main`. It builds a universal Developer ID app, notarizes and staples the app and the DMG, and publishes `vX.Y` with release notes and a SHA-256 checksum. It refuses to run if the tag already exists.
+
+</details>
 
 ## License
 
-© 2025 All rights reserved
-
-## Developer
-
-Developed by s00d
+© 2025–2026 s00d. All rights reserved.
