@@ -107,35 +107,44 @@ struct PasteboardHelperTests {
         NSPasteboard(name: NSPasteboard.Name("tray-lang.tests.\(UUID().uuidString)"))
     }
 
-    /// The copying app as seen through the pasteboard: a change count and maybe a string.
-    final class FakePasteboard: PasteboardReading, @unchecked Sendable {
-        private let lock = NSLock()
-        private var count = 0
-        private var text: String?
+    /// The copying app as the waiting code sees it: each poll returns the next scripted state,
+    /// so no threads or timing are involved.
+    final class ScriptedPasteboard: PasteboardReading {
+        private let states: [(count: Int, text: String?)]
+        private var polls = 0
 
-        var changeCount: Int { lock.withLock { count } }
-        func string(forType type: NSPasteboard.PasteboardType) -> String? { lock.withLock { text } }
+        init(_ states: [(count: Int, text: String?)]) {
+            self.states = states
+        }
 
-        func clearContents() { lock.withLock { count += 1; text = nil } }
-        func write(_ string: String) { lock.withLock { count += 1; text = string } }
+        private var current: (count: Int, text: String?) {
+            states[min(polls, states.count - 1)]
+        }
+
+        var changeCount: Int {
+            defer { polls += 1 }
+            return current.count
+        }
+
+        func string(forType type: NSPasteboard.PasteboardType) -> String? {
+            current.text
+        }
     }
 
     @Test func returnsTheNewStringOnceItIsWritten() {
-        let pasteboard = FakePasteboard()
-        pasteboard.write("before")
-        let original = pasteboard.changeCount
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.02) { pasteboard.write("after") }
-        #expect(PasteboardHelper.waitForString(changedFrom: original, timeout: 2, pasteboard: pasteboard) == "after")
+        let pasteboard = ScriptedPasteboard([(1, "before"), (1, "before"), (2, "after")])
+        #expect(PasteboardHelper.waitForString(changedFrom: 1, timeout: 2, pasteboard: pasteboard) == "after")
     }
 
     /// clearContents() bumps changeCount before the copy lands; reading right then returned nil and lost the selection.
     @Test func waitsPastClearContentsForTheString() {
-        let pasteboard = FakePasteboard()
-        pasteboard.write("before")
-        let original = pasteboard.changeCount
-        pasteboard.clearContents()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { pasteboard.write("copied") }
-        #expect(PasteboardHelper.waitForString(changedFrom: original, timeout: 2, pasteboard: pasteboard) == "copied")
+        let pasteboard = ScriptedPasteboard([(1, "before"), (2, nil), (2, nil), (2, nil), (3, "copied")])
+        #expect(PasteboardHelper.waitForString(changedFrom: 1, timeout: 2, pasteboard: pasteboard) == "copied")
+    }
+
+    @Test func givesUpWhenTheCopyNeverLands() {
+        let pasteboard = ScriptedPasteboard([(1, "before"), (2, nil)])
+        #expect(PasteboardHelper.waitForString(changedFrom: 1, timeout: 0.05, pasteboard: pasteboard) == nil)
     }
 
     @Test func realPasteboardIsReadImmediatelyWhenAlreadyChanged() {
