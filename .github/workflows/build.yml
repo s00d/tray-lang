@@ -92,6 +92,11 @@ jobs:
 
           codesign --verify --strict --verbose=2 "$APP"
           codesign -dvv "$APP" 2>&1 | grep -E "Authority=Developer ID Application|Timestamp=|flags=.*runtime"
+          # Notarization rejects debugger access; fail here instead of after a submission.
+          if codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -q "get-task-allow"; then
+            echo "::error::App is signed with com.apple.security.get-task-allow"
+            exit 1
+          fi
 
       - name: Notarize and staple app
         env:
