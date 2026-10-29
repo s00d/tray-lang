@@ -14,7 +14,7 @@ protocol SelectionDriver: AnyObject {
     func accessibilitySelectedText() -> String?
     /// Whole value of the focused element via Accessibility, used to verify a replace.
     func accessibilityFocusedValue() -> String?
-    func accessibilityReplaceSelection(with text: String) -> Bool
+    func accessibilityReplaceSelection(with text: String) -> AXWriteResult
     /// Copies the selection through the clipboard; nil when nothing is selected.
     func copySelectionViaClipboard() -> String?
     /// Puts `text` on the clipboard, pastes it and restores the clipboard; `completion` runs after restore.
@@ -24,6 +24,24 @@ protocol SelectionDriver: AnyObject {
     func clearTerminalLine(characterCount: Int)
     /// Lets the target app process events (AX writes can apply asynchronously).
     func wait(_ seconds: TimeInterval)
+}
+
+/// Outcome of writing the selection through Accessibility.
+enum AXWriteResult: Equatable {
+    /// The app accepted the write.
+    case done
+    /// The write was not delivered (not settable, no element…): safe to use another way.
+    case failed
+    /// Our call timed out; a busy app may still perform it. Never insert the text a second way.
+    case uncertain
+
+    init(_ error: AXError) {
+        switch error {
+        case .success: self = .done
+        case .cannotComplete: self = .uncertain
+        default: self = .failed
+        }
+    }
 }
 
 enum ReplaceVerification {
@@ -53,13 +71,20 @@ final class TextProcessingManager {
     private let keyboardLayoutManager: KeyboardLayoutManager
     private let spellCheckManager: SpellCheckManager
     private let notificationManager: NotificationManager
-    private let driver: SelectionDriver
+    private var driver: SelectionDriver
     private let switchesLayout: Bool
+    /// How long to wait for an AX write to show up before deciding the app ignored it.
+    /// Long enough for a busy app (Telegram, Electron) to catch up; we leave as soon as it lands.
+    private let replaceVerificationTimeout: TimeInterval
+    /// Apps that accepted an AX write but never applied it: they get the clipboard path directly.
+    private var appsIgnoringAXWrites: Set<String> = []
 
     private(set) var isProcessing = false
 
-    /// How long to wait for an AX replace to show up before deciding it did nothing.
-    static let replaceVerificationTimeout: TimeInterval = 0.25
+    var driverForTesting: SelectionDriver {
+        get { driver }
+        set { driver = newValue }
+    }
 
     init(
         textTransformer: TextTransformer,
@@ -67,8 +92,10 @@ final class TextProcessingManager {
         spellCheckManager: SpellCheckManager,
         notificationManager: NotificationManager,
         driver: SelectionDriver = SystemSelectionDriver(),
-        switchesLayout: Bool = !ProcessRuntime.isRunningUnderTests
+        switchesLayout: Bool = !ProcessRuntime.isRunningUnderTests,
+        replaceVerificationTimeout: TimeInterval = 1.0
     ) {
+        self.replaceVerificationTimeout = replaceVerificationTimeout
         self.textTransformer = textTransformer
         self.keyboardLayoutManager = keyboardLayoutManager
         self.spellCheckManager = spellCheckManager
@@ -95,7 +122,7 @@ final class TextProcessingManager {
         }
 
         if let selected = driver.accessibilitySelectedText(), !selected.isEmpty {
-            replace(selected, action: action, selectedViaAccessibility: true)
+            replace(selected, action: action, selectedViaAccessibility: true, bundleID: bundleID)
             return
         }
 
@@ -111,7 +138,7 @@ final class TextProcessingManager {
             finishProcessing()
             return
         }
-        replace(copied, action: action, selectedViaAccessibility: false)
+        replace(copied, action: action, selectedViaAccessibility: false, bundleID: bundleID)
     }
 
     private func convert(_ text: String, action: ProcessingAction) -> (text: String, switchTo: String?) {
@@ -125,7 +152,7 @@ final class TextProcessingManager {
         }
     }
 
-    private func replace(_ original: String, action: ProcessingAction, selectedViaAccessibility: Bool) {
+    private func replace(_ original: String, action: ProcessingAction, selectedViaAccessibility: Bool, bundleID: String?) {
         let (converted, layoutID) = convert(original, action: action)
         guard converted != original else {
             debugLog("ℹ️ Text unchanged, skipping")
@@ -133,7 +160,7 @@ final class TextProcessingManager {
             return
         }
 
-        if selectedViaAccessibility, replaceViaAccessibility(original: original, converted: converted) {
+        if selectedViaAccessibility, replaceViaAccessibility(original: original, converted: converted, bundleID: bundleID) {
             selectLayout(layoutID)
             finishProcessing()
             return
@@ -145,29 +172,44 @@ final class TextProcessingManager {
         selectLayout(layoutID)
     }
 
-    /// True when the AX write landed (or may have landed — never paste on top of it).
-    private func replaceViaAccessibility(original: String, converted: String) -> Bool {
-        let valueBefore = driver.accessibilityFocusedValue()
-        guard driver.accessibilityReplaceSelection(with: converted) else {
-            debugLog("⚠️ AX replace failed, using paste")
+    /// True when the AX write landed or may still land — the clipboard path must not run then,
+    /// or a busy app ends up with the text twice.
+    private func replaceViaAccessibility(original: String, converted: String, bundleID: String?) -> Bool {
+        if let bundleID, appsIgnoringAXWrites.contains(bundleID) {
             return false
         }
+        let valueBefore = driver.accessibilityFocusedValue()
+        switch driver.accessibilityReplaceSelection(with: converted) {
+        case .failed:
+            debugLog("⚠️ AX replace not delivered, using paste")
+            return false
+        case .uncertain:
+            debugLog("⚠️ AX replace timed out; assuming the app applies it, no paste")
+            return true
+        case .done:
+            break
+        }
 
-        let deadline = Date().addingTimeInterval(Self.replaceVerificationTimeout)
-        var outcome = ReplaceVerification.Outcome.notApplied
+        let deadline = Date().addingTimeInterval(replaceVerificationTimeout)
         repeat {
-            outcome = ReplaceVerification.outcome(
+            let outcome = ReplaceVerification.outcome(
                 original: original,
                 valueBefore: valueBefore,
                 valueAfter: driver.accessibilityFocusedValue(),
                 selectionAfter: driver.accessibilitySelectedText()
             )
-            if outcome == .applied { break }
+            if outcome == .applied {
+                debugLog("✅ AX replace applied")
+                return true
+            }
             driver.wait(0.02)
         } while Date() < deadline
 
-        debugLog(outcome == .applied ? "✅ AX replace applied" : "⚠️ AX reported success but nothing changed, using paste")
-        return outcome == .applied
+        debugLog("⚠️ AX write accepted but never applied; this app gets the clipboard path from now on")
+        if let bundleID {
+            appsIgnoringAXWrites.insert(bundleID)
+        }
+        return false
     }
 
     // MARK: - Terminal

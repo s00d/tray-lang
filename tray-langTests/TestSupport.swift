@@ -49,6 +49,10 @@ final class FakeTextApp: SelectionDriver {
         case writeWithoutValue
         /// No AX text at all; only the clipboard works.
         case none
+        /// The app is busy: the write is accepted but shows up only `after` seconds later (Telegram under load).
+        case appliesLate(after: TimeInterval)
+        /// The AX call times out on our side, yet the app performs the write.
+        case timesOutButApplies
     }
 
     var bundleID: String?
@@ -61,6 +65,7 @@ final class FakeTextApp: SelectionDriver {
 
     private(set) var pasteCount = 0
     private(set) var axWriteCount = 0
+    private var pendingWrite: (text: String, landsAt: Date)?
     private(set) var clearedTerminalCharacters: Int?
     private var pendingPasteCompletions: [() -> Void] = []
 
@@ -104,26 +109,38 @@ final class FakeTextApp: SelectionDriver {
     }
 
     func accessibilityFocusedValue() -> String? {
+        if let pending = pendingWrite, Date() >= pending.landsAt {
+            pendingWrite = nil
+            replaceSelection(with: pending.text)
+        }
         switch axBehavior {
         case .none, .writeWithoutValue: return nil
         default: return text
         }
     }
 
-    func accessibilityReplaceSelection(with newText: String) -> Bool {
+    func accessibilityReplaceSelection(with newText: String) -> AXWriteResult {
         switch axBehavior {
         case .none:
-            return false
+            return .failed
         case .liesAboutWrite:
             axWriteCount += 1
-            return true
+            return .done
+        case let .appliesLate(delay):
+            axWriteCount += 1
+            pendingWrite = (newText, Date().addingTimeInterval(delay))
+            return .done
+        case .timesOutButApplies:
+            axWriteCount += 1
+            replaceSelection(with: newText)
+            return .uncertain
         case .staleSelection:
             staleSelectedText = selectedText
             fallthrough
         default:
             axWriteCount += 1
             replaceSelection(with: newText)
-            return true
+            return .done
         }
     }
 
@@ -156,5 +173,7 @@ final class FakeTextApp: SelectionDriver {
         selection = nil
     }
 
-    func wait(_ seconds: TimeInterval) {}
+    func wait(_ seconds: TimeInterval) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
 }

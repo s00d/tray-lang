@@ -9,8 +9,11 @@ enum ClipboardConversionTiming {
     /// Max wait for pasteboard changeCount after Cmd+C.
     static let pasteboardChangeTimeout: TimeInterval = 0.25
 
-    /// Delay before restoring original clipboard after paste.
+    /// Delay before restoring original clipboard after paste, when the field can't be read to see the paste land.
     static let clipboardRestoreDelay: TimeInterval = 0.3
+
+    /// Longest wait for a paste to show up in a readable field before restoring the clipboard anyway.
+    static let pasteLandTimeout: TimeInterval = 1.5
 
     /// Worst-case wall time for mode-3 waits when modifiers are already released
     /// (pasteboard timeout + restore delay). Does not include user still holding the hotkey.

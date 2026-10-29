@@ -34,12 +34,14 @@ final class SystemSelectionDriver: SelectionDriver {
         AX.focusedElement().flatMap { AX.attribute($0, kAXValueAttribute) as? String }
     }
 
-    func accessibilityReplaceSelection(with text: String) -> Bool {
-        guard let focused = AX.focusedElement() else { return false }
+    func accessibilityReplaceSelection(with text: String) -> AXWriteResult {
+        guard let focused = AX.focusedElement() else { return .failed }
         var settable: DarwinBoolean = false
         guard AXUIElementIsAttributeSettable(focused, kAXSelectedTextAttribute as CFString, &settable) == .success,
-              settable.boolValue else { return false }
-        return AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, text as CFString) == .success
+              settable.boolValue else { return .failed }
+        // A busy app answers late; give the write more time than a read, and treat a timeout as "may apply".
+        AXUIElementSetMessagingTimeout(focused, AX.actionTimeout)
+        return AXWriteResult(AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, text as CFString))
     }
 
     // MARK: Clipboard
@@ -57,7 +59,7 @@ final class SystemSelectionDriver: SelectionDriver {
         pasteboard.setString(marker, forType: .string)
         let markerChangeCount = pasteboard.changeCount
 
-        if copyItem?.press() != true {
+        if copyItem.map({ MenuAction.wasDelivered($0.press()) }) != true {
             KeySynthesizer.press(keyCode: 8, flags: .maskCommand)
         }
 
@@ -71,19 +73,23 @@ final class SystemSelectionDriver: SelectionDriver {
     }
 
     func pasteViaClipboard(_ text: String, completion: @escaping () -> Void) {
+        let valueBefore = accessibilityFocusedValue()
         let backup = ClipboardBackup(pasteboard)
         pasteboard.clearContents()
         pasteboard.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.TransientType")], owner: nil)
         pasteboard.setString(text, forType: .string)
         let writtenChangeCount = pasteboard.changeCount
 
-        let pastedViaMenu = MenuAction.find(.paste).map { $0.isEnabled && $0.press() } ?? false
+        // A press that timed out still runs in the app: sending ⌘V as well would paste twice.
+        let menuItem = MenuAction.find(.paste)
+        let pastedViaMenu = menuItem.map { $0.isEnabled && MenuAction.wasDelivered($0.press()) } ?? false
         if !pastedViaMenu {
             KeySynthesizer.press(keyCode: 9, flags: .maskCommand)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardConversionTiming.clipboardRestoreDelay) { [pasteboard] in
-            // Someone (a clipboard manager, the user) wrote after us: keep their content.
+        // Restore only after the app has read the clipboard: when the field is readable, wait for it to change
+        // (a busy app may take a second); otherwise fall back to a fixed delay.
+        let restore: () -> Void = { [pasteboard] in
             if ClipboardMarkerLogic.shouldSkipRestore(currentChangeCount: pasteboard.changeCount, writtenChangeCount: writtenChangeCount) {
                 debugLog("📋 Clipboard changed externally, not restoring")
             } else {
@@ -91,6 +97,20 @@ final class SystemSelectionDriver: SelectionDriver {
             }
             completion()
         }
+        guard let valueBefore else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardConversionTiming.clipboardRestoreDelay, execute: restore)
+            return
+        }
+        let deadline = Date().addingTimeInterval(ClipboardConversionTiming.pasteLandTimeout)
+        func check() {
+            if accessibilityFocusedValue() != valueBefore || Date() >= deadline {
+                // Small grace period: some apps read the clipboard again right after inserting.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: restore)
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03, execute: check)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03, execute: check)
     }
 
     // MARK: Terminal
@@ -140,6 +160,8 @@ struct ClipboardBackup {
 
 enum AX {
     static let messagingTimeout: Float = 0.1
+    /// Writes and presses: a busy app can take longer to answer than a read.
+    static let actionTimeout: Float = 0.5
 
     static func focusedElement() -> AXUIElement? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
@@ -179,8 +201,14 @@ struct MenuAction {
         (AX.attribute(element, kAXEnabledAttribute) as? Bool) ?? true
     }
 
-    func press() -> Bool {
-        AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
+    func press() -> AXError {
+        AXUIElementSetMessagingTimeout(element, AX.actionTimeout)
+        return AXUIElementPerformAction(element, kAXPressAction as CFString)
+    }
+
+    /// `.cannotComplete` means our call timed out, not that the app refused: it performs the press anyway.
+    static func wasDelivered(_ result: AXError) -> Bool {
+        result == .success || result == .cannotComplete
     }
 
     static func find(_ kind: Kind) -> MenuAction? {

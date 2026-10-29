@@ -17,7 +17,8 @@ struct TextReplacementTests {
             spellCheckManager: SpellCheckManager(),
             notificationManager: NotificationManager(),
             driver: app,
-            switchesLayout: false
+            switchesLayout: false,
+            replaceVerificationTimeout: 0.2
         )
         manager.processSelectedText(action: action)
         app.finishPendingPastes()
@@ -67,6 +68,76 @@ struct TextReplacementTests {
         _ = run(app)
         #expect(app.text == "привет")
         #expect(app.pasteCount == 0)
+    }
+
+    // MARK: Slow apps (Telegram under load) — the reported double insert
+
+    /// Telegram busy for 0.4 s: the write lands late. Giving up early and pasting inserted the text twice.
+    @Test func lateAXWriteIsWaitedForNotPastedOver() {
+        let app = FakeTextApp(text: "ghbdtn", bundleID: "ru.keepcoder.Telegram", axBehavior: .appliesLate(after: 0.4))
+        let manager = TextProcessingManager(
+            textTransformer: transformer,
+            keyboardLayoutManager: layouts,
+            spellCheckManager: SpellCheckManager(),
+            notificationManager: NotificationManager(),
+            driver: app,
+            switchesLayout: false
+        )
+        manager.processSelectedText(action: .changeLayout)
+        app.finishPendingPastes()
+        #expect(app.text == "привет")
+        #expect(app.pasteCount == 0, "paste on top of a late AX write inserts the text twice")
+    }
+
+    /// Our AX call timed out but the app still performed it: never paste after an uncertain write.
+    @Test func timedOutAXWriteIsNotFollowedByPaste() {
+        let app = FakeTextApp(text: "ghbdtn", bundleID: "ru.keepcoder.Telegram", axBehavior: .timesOutButApplies)
+        _ = run(app)
+        #expect(app.text == "привет")
+        #expect(app.pasteCount == 0)
+    }
+
+    /// An app that ignores AX writes costs the wait once; after that it goes straight to paste.
+    @Test func appThatIgnoresAXWritesIsRememberedForTheSession() {
+        let manager = TextProcessingManager(
+            textTransformer: transformer,
+            keyboardLayoutManager: layouts,
+            spellCheckManager: SpellCheckManager(),
+            notificationManager: NotificationManager(),
+            driver: FakeTextApp(text: ""),
+            switchesLayout: false,
+            replaceVerificationTimeout: 0.05
+        )
+        let first = FakeTextApp(text: "ghbdtn", bundleID: "com.example.electron", axBehavior: .liesAboutWrite)
+        manager.driverForTesting = first
+        manager.processSelectedText(action: .changeLayout)
+        first.finishPendingPastes()
+        #expect(first.text == "привет")
+        #expect(first.axWriteCount == 1)
+        #expect(first.pasteCount == 1)
+
+        let second = FakeTextApp(text: "ghbdtn", bundleID: "com.example.electron", axBehavior: .liesAboutWrite)
+        manager.driverForTesting = second
+        manager.processSelectedText(action: .changeLayout)
+        second.finishPendingPastes()
+        #expect(second.text == "привет")
+        #expect(second.axWriteCount == 0, "known to ignore AX writes: paste directly, no wait")
+        #expect(second.pasteCount == 1)
+    }
+
+    @Test func menuPressThatTimedOutCountsAsDelivered() {
+        #expect(MenuAction.wasDelivered(.success))
+        #expect(MenuAction.wasDelivered(.cannotComplete), "a timed-out press still runs in the app; adding ⌘V doubles the paste")
+        #expect(!MenuAction.wasDelivered(.actionUnsupported))
+        #expect(!MenuAction.wasDelivered(.invalidUIElement))
+        #expect(!MenuAction.wasDelivered(.apiDisabled))
+    }
+
+    @Test func axWriteResultFromAXError() {
+        #expect(AXWriteResult(.success) == .done)
+        #expect(AXWriteResult(.cannotComplete) == .uncertain)
+        #expect(AXWriteResult(.attributeUnsupported) == .failed)
+        #expect(AXWriteResult(.invalidUIElement) == .failed)
     }
 
     // MARK: Clipboard path
